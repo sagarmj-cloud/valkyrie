@@ -8,6 +8,6 @@
 | `app-icon*` | App / PWA icons, 192 to 2048 px, light and dark. |
 | `favicon*` | 16/32/48 px PNG, ICO, SVG. |
 | `banner.*` | Wide header banner with the long tagline. |
-| `social-preview.png` | 1280×640 GitHub social preview. Upload under **Settings → General → Social preview**. |
+| `social-preview.png`, `social-preview-indigo.png` | 1280×640 GitHub social preview, dark and indigo variants. Set under **Settings → General → Social preview** (currently the indigo one). |
 
 All SVGs are self-contained (text outlined, no external fonts).
