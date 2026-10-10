@@ -6,3 +6,5 @@ __pycache__/
 *.pyc
 .pytest_cache/
 .DS_Store
+node_modules/
+reference/package-lock.json

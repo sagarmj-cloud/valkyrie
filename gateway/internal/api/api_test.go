@@ -40,7 +40,16 @@ func testServer(t *testing.T) (*httptest.Server, string) {
 		{Name: "menu.search_menu", Server: "orders", Version: "1", RiskTier: 0, DataClassification: "public",
 			InputSchema: json.RawMessage(`{"type":"object"}`), Credentials: registry.Credentials{Scope: "menu:read", TTLSeconds: 60}, Limits: registry.Limits{TimeoutMS: 1000}},
 	}})
-	pdp := policy.Static{Fn: func(_ string, in map[string]any) policy.Decision {
+	pdp := policy.Static{Fn: func(rule string, in map[string]any) policy.Decision {
+		if rule == "valkyrie/delegation/decision" {
+			target, _ := in["target"].(map[string]any)["id"].(string)
+			for _, id := range in["chain"].([]string) {
+				if id == target {
+					return policy.Decision{Allow: false, DenyReason: []string{"delegation_loop"}, PolicyVersion: "v1"}
+				}
+			}
+			return policy.Decision{Allow: true, PolicyVersion: "v1"}
+		}
 		role := in["agent"].(map[string]any)["role"].(string)
 		tool := in["tool"].(map[string]any)["name"].(string)
 		if role == "menu" && tool != "menu.search_menu" {
@@ -161,5 +170,30 @@ func TestReadyzReflectsDependencies(t *testing.T) {
 	resp, _ := http.Get(srv.URL + "/readyz")
 	if resp.StatusCode != 503 {
 		t.Fatalf("readyz should be 503 when a dependency is down, got %d", resp.StatusCode)
+	}
+}
+
+func TestDelegateEndpointUsesTokenChain(t *testing.T) {
+	srv, _ := testServer(t)
+	// This supervisor's verified chain already contains menu-01.
+	tok, _ := authn.Sign([]byte("s"), map[string]any{"sub": "jane", "tenant_id": "acme", "agent_id": "c1", "agent_role": "concierge",
+		"chain": []string{"menu-01"}, "exp": time.Now().Add(time.Hour).Unix()})
+	// The body claims an empty chain; the gateway must ignore it and deny the loop.
+	resp, out := do(t, srv, tok, "POST", "/v1/delegate", `{"target":{"id":"menu-01","tenant_id":"acme","trust_level":2},"task":{"required_trust":1,"est_tokens":10},"chain":[]}`)
+	if resp.StatusCode != http.StatusForbidden || out["allow"] != false {
+		t.Fatalf("status=%d body=%v", resp.StatusCode, out)
+	}
+	if rs, _ := out["reason"].([]any); len(rs) != 1 || rs[0] != "delegation_loop" {
+		t.Fatalf("reason: %v", out["reason"])
+	}
+	// A fresh target is allowed.
+	resp, out = do(t, srv, tok, "POST", "/v1/delegate", `{"target":{"id":"ordering-01","tenant_id":"acme","trust_level":2},"task":{"required_trust":1,"est_tokens":10}}`)
+	if resp.StatusCode != http.StatusOK || out["allow"] != true {
+		t.Fatalf("status=%d body=%v", resp.StatusCode, out)
+	}
+	// target is required
+	resp, _ = do(t, srv, tok, "POST", "/v1/delegate", `{"task":{}}`)
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("missing target must be 400, got %d", resp.StatusCode)
 	}
 }

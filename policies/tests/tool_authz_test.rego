@@ -106,3 +106,20 @@ test_decision_object_shape if {
 	count(d.deny_reason) == 1
 	d.policy_version == "v2026.10.1"
 }
+
+# ---------------------------------------------------------------- delegation chain (PEP 2 at the tool call)
+test_chain_within_depth_allowed if {
+	tool_authz.allow with input as object.union(cart(["Margherita Pizza"]), {"chain": ["concierge-01", "menu-01"]})
+}
+
+test_chain_loop_denied if {
+	inp := object.union(cart(["Margherita Pizza"]), {"chain": ["concierge-01", "ordering-01"]})
+	not tool_authz.allow with input as inp
+	"delegation_loop" in tool_authz.deny_reason with input as inp
+}
+
+test_chain_too_deep_denied if {
+	inp := object.union(cart(["Margherita Pizza"]), {"chain": ["a", "b", "c", "d"]})
+	not tool_authz.allow with input as inp
+	"delegation_too_deep" in tool_authz.deny_reason with input as inp
+}

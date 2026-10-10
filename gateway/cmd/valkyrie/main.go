@@ -72,7 +72,9 @@ func main() {
 		st = store.NewMemory(0)
 	}
 
-	// --- caller authentication: JWKS (prod) and/or HMAC (dev, migration)
+	// --- caller authentication: JWKS (prod) and/or HMAC (dev only).
+	// Subject, tenant and delegation chain are read from the token, so in prod
+	// only the IdP may mint one; config.Validate refuses prod without a JWKS URL.
 	var verifiers authn.Chain
 	if cfg.OIDCJWKSURL != "" {
 		j := authn.NewJWKS(cfg.OIDCIssuer, cfg.OIDCAudience, cfg.OIDCJWKSURL)
@@ -82,7 +84,7 @@ func main() {
 		}
 		verifiers = append(verifiers, j)
 	}
-	if cfg.Env != "prod" || cfg.AuthSecret != "dev-secret-change-me" {
+	if cfg.Env != "prod" {
 		verifiers = append(verifiers, authn.HMACVerifier{Secret: []byte(cfg.AuthSecret)})
 	}
 

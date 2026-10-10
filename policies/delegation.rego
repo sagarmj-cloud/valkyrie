@@ -1,6 +1,9 @@
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2026 Sagar Jadhav
-# delegation.rego — enforced at PEP 2 (supervisor → specialist).
+# delegation.rego — enforced at PEP 2 (supervisor → specialist) by the gateway's
+# POST /v1/delegate: input.caller and input.chain come from the verified token,
+# input.target / task / budget from the request. tool_authz.rego re-checks chain
+# integrity (loop, depth) on every tool call.
 package valkyrie.delegation
 
 import rego.v1

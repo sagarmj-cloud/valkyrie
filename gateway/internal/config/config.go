@@ -82,8 +82,10 @@ func (c Config) Validate() error {
 		return nil
 	}
 	var errs []string
-	if c.AuthSecret == "dev-secret-change-me" && c.OIDCJWKSURL == "" {
-		errs = append(errs, "VALKYRIE_OIDC_JWKS_URL is required in prod (or set a non-default VALKYRIE_AUTH_SECRET)")
+	if c.OIDCJWKSURL == "" {
+		// Subject, tenant and delegation chain are only as trustworthy as the
+		// token issuer. A shared HMAC secret lets any holder mint them.
+		errs = append(errs, "VALKYRIE_OIDC_JWKS_URL is required in prod: caller identity and delegation chain must be attested by the IdP")
 	}
 	if c.LeaseKey == "dev-lease-key-change-me" || len(c.LeaseKey) < 32 {
 		errs = append(errs, "VALKYRIE_LEASE_KEY must be a random key of at least 32 bytes in prod")

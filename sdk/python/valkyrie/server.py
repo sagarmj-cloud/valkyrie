@@ -37,7 +37,7 @@ from starlette.responses import PlainTextResponse
 class GatewayLeaseVerifier(TokenVerifier):
     """Accepts lease tokens the gateway's SignedBroker minted for this scope.
 
-    The token is an HS256 JWT {iss, scope, lease_id, iat, exp} signed with the
+    The token is an HS256 JWT {iss, scope, lease_id, iat, exp, sub, tenant_id} signed with the
     key shared between the gateway and first-party servers
     (VALKYRIE_LEASE_KEY). Verification is cryptographic: signature, issuer,
     scope and expiry. A server never accepts a token for another scope, and
@@ -59,8 +59,11 @@ class GatewayLeaseVerifier(TokenVerifier):
         exp = claims.get("exp")
         if not isinstance(exp, (int, float)) or time.time() > exp + self.leeway_s:
             return None
-        return AccessToken(token=token, client_id="valkyrie-gateway", scopes=[self.scope],
-                           expires_at=int(exp), claims={"lease_id": claims.get("lease_id")})
+        # sub / tenant_id are the end user the gateway is acting for: a server can
+        # authorize and audit at user level without trusting the arguments.
+        return AccessToken(token=token, client_id="valkyrie-gateway", scopes=[self.scope], expires_at=int(exp),
+                           claims={"lease_id": claims.get("lease_id"), "sub": claims.get("sub"),
+                                   "tenant_id": claims.get("tenant_id")})
 
 
 def verify_hs256(token: str, key: bytes) -> dict | None:

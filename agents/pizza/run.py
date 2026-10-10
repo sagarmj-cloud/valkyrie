@@ -27,7 +27,7 @@ def main() -> int:
         result = graph.invoke(Command(resume={"ticket_id": "APR-7781"}), cfg)
 
     print("─" * 78)
-    print("  AGENT       TOOL                      STATUS             DETAIL")
+    print("  AGENT       TOOL / HANDOFF            STATUS             DETAIL")
     print("─" * 78)
     for t in result.get("trace", []):
         detail = "; ".join(t["reason"]) if t["reason"] else (f"redacted {t['redacted']}" if t["redacted"] else "")

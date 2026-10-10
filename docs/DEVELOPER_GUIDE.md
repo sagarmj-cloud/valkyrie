@@ -326,7 +326,7 @@ Then: add `inventory` to `registry/servers.yaml`, write `registry/manifests/inve
 
 What the scaffold does for you:
 
-- **Credential check.** The server accepts only lease tokens the gateway's `SignedBroker` minted for its scope: an HS256 JWT `{iss, scope, lease_id, exp}` verified with `VALKYRIE_LEASE_KEY` — signature, issuer, scope and expiry all checked (`GatewayLeaseVerifier`). A token for `orders:write` cannot call `inventory.get_stock`, and a leaked token dies with its TTL. Rotate the key by running both keys for one TTL window.
+- **Credential check.** The server accepts only lease tokens the gateway's `SignedBroker` minted for its scope: an HS256 JWT `{iss, scope, lease_id, exp, sub, tenant_id}` verified with `VALKYRIE_LEASE_KEY` — signature, issuer, scope and expiry all checked (`GatewayLeaseVerifier`). A token for `orders:write` cannot call `inventory.get_stock`, and a leaked token dies with its TTL. Rotate the key by running both keys for one TTL window.
 - **Registry check.** `serve()` lists the server's tools and exits with code 2 if any is unregistered.
 - **Transport.** Streamable HTTP, stateless, JSON responses (`json_response=True`) because the gateway handles streaming to the client. Turn on SSE responses only for long-running tools that emit progress.
 - **Health.** `GET /healthz` for readiness probes.
@@ -366,6 +366,7 @@ res.as_tool_message()   # "DENIED by policy: … Choose a different action."  �
 `agents/pizza/graph.py` is the reference. The shape to copy:
 
 1. **One identity per role.** Each node mints (in production: obtains) a token with its own `agent_role`, so the policy sees exactly who is calling. Do not share one client across roles.
+1. **Ask before you hand off.** Before a supervisor delegates, it calls `client.delegate(target, task, budget=...)` (`POST /v1/delegate`, PEP 2). The gateway evaluates `valkyrie/delegation/decision` with the caller and the delegation chain taken from the verified token, never from the request, and audits the verdict as `delegate:<target>`. Every tool call is additionally checked for chain integrity in `tool_authz` (`delegation_loop`, `delegation_too_deep`), so a chain that was never checked at handoff is still stopped at the tool.
 2. **Context travels with the call.** The slice of the profile the policy needs (`diet`, `allergens`, `budget_usd`) is stored on the state as `customer_ctx` and attached to every `invoke`. Declare it in the `TypedDict` — LangGraph drops undeclared keys silently, which is exactly the bug the `missing_customer_context` rule now catches.
 3. **Deny is a branch, not an exception.** Loop over candidates; on `Status.DENIED` record the reason and try the next one. Never catch and retry the same call.
 4. **Approval is an interrupt.** On `Status.APPROVAL_REQUIRED`, store `pending_approval` and route to a node that calls `interrupt(...)`. The checkpointer persists the run; `graph.invoke(Command(resume={"ticket_id": "APR-…"}), cfg)` continues it, and the retry carries `approval={"ticket_id": …}` so OPA's `valid_ticket` passes.
@@ -423,8 +424,8 @@ What the dev stack stubs, and what replaces it.
 
 | Concern | Dev | Production |
 | --- | --- | --- |
-| Caller identity | HS256 JWT from `mint_dev_token` | **Built:** `authn.JWKSVerifier` (RS256, issuer/audience/exp, JWKS cache with rate-limited refresh). Set `VALKYRIE_OIDC_ISSUER`, `VALKYRIE_OIDC_AUDIENCE`, `VALKYRIE_OIDC_JWKS_URL`; the agent service obtains an on-behalf-of token carrying `agent_id`/`agent_role`/`tenant_id`. mTLS peer identity is terminated at the ingress today. |
-| Credentials | `SignedBroker` with the dev lease key | **Built:** `SignedBroker` with a 32-byte random `VALKYRIE_LEASE_KEY` for first-party servers; `VaultBroker` (`VALKYRIE_VAULT_ADDR/TOKEN/MOUNT`) for dynamic secrets; `StaticBroker` for third-party API keys mounted into the gateway only. |
+| Caller identity | HS256 JWT from `mint_dev_token` | **Built:** `authn.JWKSVerifier` (RS256, issuer/audience/exp, JWKS cache with rate-limited refresh). Set `VALKYRIE_OIDC_ISSUER`, `VALKYRIE_OIDC_AUDIENCE`, `VALKYRIE_OIDC_JWKS_URL`; the agent service obtains an on-behalf-of token from the IdP (Okta, Entra, Auth0: OAuth 2.0 token exchange, RFC 8693) carrying `sub`, `tenant_id`, `agent_id`, `agent_role` and `chain`. **`VALKYRIE_ENV=prod` refuses to start without a JWKS URL and never loads the HMAC verifier**: subject, tenant and chain are only as trustworthy as their issuer. mTLS peer identity is terminated at the ingress today. |
+| Credentials | `SignedBroker` with the dev lease key | **Built:** `SignedBroker` with a 32-byte random `VALKYRIE_LEASE_KEY` for first-party servers; `VaultBroker` (`VALKYRIE_VAULT_ADDR/TOKEN/MOUNT`) for dynamic secrets; `StaticBroker` for third-party API keys mounted into the gateway only. Signed leases carry `sub` and `tenant_id`, so a first-party server can authorize and audit at user level (`GatewayLeaseVerifier` exposes them in `AccessToken.claims`). |
 | Policy delivery | registryd serves the signed bundle, HS256 | **Built:** same path; switch `keys.valkyrie-ci.algorithm` to RS256 and sign with a KMS-held private key; ship `decision_logs` to a collector instead of console |
 | Registry | registryd on a local state file | **Built:** same path; run registryd with a PVC (`deploy/k8s/registryd.yaml`) or implement `store.Store` on Postgres for HA; gateways poll with ETag and keep the last good copy |
 | Idempotency, rate limits | in-process bounded TTL store | **Built:** `store.Redis` — set `VALKYRIE_REDIS_ADDR` (required when `VALKYRIE_ENV=prod`) |

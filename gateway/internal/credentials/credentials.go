@@ -7,7 +7,7 @@
 //
 // Three brokers:
 //
-//   - SignedBroker: mints HS256 lease tokens {scope, lease_id, exp, iss}
+//   - SignedBroker: mints HS256 lease tokens {scope, lease_id, exp, iss, sub, tenant_id}
 //     signed with a key shared with the MCP servers. Servers verify the
 //     signature, scope and expiry (see sdk/python/valkyrie/server.py). This
 //     is the default for first-party servers: no network hop, no Vault
@@ -55,6 +55,11 @@ type Request struct {
 	Scope     string
 	SecretRef string // static: environment variable name holding the secret
 	TTL       time.Duration
+	// Subject and TenantID identify the end user the call is for. They ride
+	// in the signed lease so a first-party server can authorize and audit at
+	// user level without trusting the arguments.
+	Subject  string
+	TenantID string
 }
 
 type Broker interface {
@@ -84,6 +89,12 @@ func (s *SignedBroker) Lease(_ context.Context, req Request) (Lease, error) {
 	id := "lease-" + hex.EncodeToString(b)
 	exp := s.now().Add(req.TTL)
 	claims := map[string]any{"iss": s.issuer, "scope": req.Scope, "lease_id": id, "iat": s.now().Unix(), "exp": exp.Unix()}
+	if req.Subject != "" {
+		claims["sub"] = req.Subject
+	}
+	if req.TenantID != "" {
+		claims["tenant_id"] = req.TenantID
+	}
 	tok, err := signHS256(s.key, claims)
 	if err != nil {
 		return Lease{}, err

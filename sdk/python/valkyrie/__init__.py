@@ -8,7 +8,7 @@
 Chooses who passes.
 """
 
-from .client import AsyncGatewayClient, GatewayClient, GatewayUnavailable, InvokeResult, Status, mint_dev_token
+from .client import AsyncGatewayClient, DelegationResult, GatewayClient, GatewayUnavailable, InvokeResult, Status, mint_dev_token
 
-__all__ = ["AsyncGatewayClient", "GatewayClient", "GatewayUnavailable", "InvokeResult", "Status", "mint_dev_token"]
+__all__ = ["AsyncGatewayClient", "DelegationResult", "GatewayClient", "GatewayUnavailable", "InvokeResult", "Status", "mint_dev_token"]
 __version__ = "0.2.0"

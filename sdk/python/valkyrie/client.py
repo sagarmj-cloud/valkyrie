@@ -81,6 +81,22 @@ class InvokeResult:
         return f"ERROR ({self.status.value}): {'; '.join(self.reason)}"
 
 
+@dataclass
+class DelegationResult:
+    """Verdict for a supervisor -> specialist handoff (PEP 2)."""
+    allow: bool
+    reason: list[str] = field(default_factory=list)
+    decision_id: str = ""
+    policy_version: str = ""
+    trace_id: str = ""
+    http_status: int = 0
+
+    def as_tool_message(self) -> str:
+        if self.allow:
+            return "delegation allowed"
+        return f"DELEGATION DENIED by policy: {'; '.join(self.reason)}. Do the task yourself or choose another agent."
+
+
 def mint_dev_token(secret: str, *, sub: str, tenant_id: str, agent_id: str, agent_role: str,
                    chain: list[str] | None = None, ttl_s: int = 3600) -> str:
     """HS256 JWT matching gateway/internal/authn. Dev and CI only; production
@@ -118,6 +134,27 @@ class GatewayClient:
         r = self._http.get("/v1/tools")
         r.raise_for_status()
         return r.json()["tools"]
+
+    # -- delegation (PEP 2) ---------------------------------------------
+    def delegate(self, target: dict[str, Any], task: dict[str, Any], *, budget: dict[str, Any] | None = None) -> DelegationResult:
+        """Ask the gateway whether this agent may hand `task` to `target`.
+
+        The gateway takes the caller and its delegation chain from the verified
+        token, so neither can be forged here. A deny is a normal result."""
+        body: dict[str, Any] = {"target": target, "task": task}
+        if budget:
+            body["budget"] = budget
+        try:
+            r = self._http.post("/v1/delegate", json=body)
+        except (httpx.ConnectError, httpx.ReadTimeout, httpx.RemoteProtocolError) as e:
+            raise GatewayUnavailable(str(e)) from e
+        try:
+            j = r.json()
+        except ValueError:
+            return DelegationResult(allow=False, reason=[f"gateway returned {r.status_code}"], http_status=r.status_code)
+        return DelegationResult(allow=bool(j.get("allow", False)), reason=list(j.get("reason") or []),
+                                decision_id=j.get("decision_id", ""), policy_version=j.get("policy_version", ""),
+                                trace_id=j.get("trace_id", ""), http_status=r.status_code)
 
     # -- invocation ------------------------------------------------------
     def invoke(self, tool: str, args: dict[str, Any] | None = None, *, customer: dict[str, Any] | None = None,
@@ -194,6 +231,16 @@ class AsyncGatewayClient:
                             redacted=data.get("redacted") or [], decision_id=data.get("decision_id", ""),
                             policy_version=data.get("policy_version", ""), trace_id=data.get("trace_id", ""),
                             http_status=r.status_code, replayed=bool(data.get("replayed")))
+
+    async def delegate(self, target: dict[str, Any], task: dict[str, Any], *, budget: dict[str, Any] | None = None) -> DelegationResult:
+        body: dict[str, Any] = {"target": target, "task": task}
+        if budget:
+            body["budget"] = budget
+        r = await self._http.post("/v1/delegate", json=body)
+        j = r.json() if r.content else {}
+        return DelegationResult(allow=bool(j.get("allow", False)), reason=list(j.get("reason") or []),
+                                decision_id=j.get("decision_id", ""), policy_version=j.get("policy_version", ""),
+                                trace_id=j.get("trace_id", ""), http_status=r.status_code)
 
     async def aclose(self) -> None:
         await self._http.aclose()

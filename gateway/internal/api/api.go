@@ -56,6 +56,7 @@ func (s *Server) Handler() http.Handler {
 	}
 	mux.HandleFunc("GET /v1/tools", s.withAuth(s.listTools))
 	mux.HandleFunc("POST /v1/tools/invoke", s.withAuth(s.invoke))
+	mux.HandleFunc("POST /v1/delegate", s.withAuth(s.delegate))
 	mux.HandleFunc("POST /mcp", s.withAuth(s.mcp))
 	mux.HandleFunc("GET /mcp", s.withAuth(func(w http.ResponseWriter, r *http.Request, _ authn.Caller) {
 		// Server-initiated stream: not used by the gateway (it has nothing to push).
@@ -162,6 +163,26 @@ func (s *Server) invoke(w http.ResponseWriter, r *http.Request, c authn.Caller) 
 		Customer: req.Customer, Approval: req.Approval, Budget: req.Budget,
 	})
 	writeJSON(w, statusFor(res.Status), res)
+}
+
+// delegate is PEP 2: a supervisor asks before handing a task to another agent.
+func (s *Server) delegate(w http.ResponseWriter, r *http.Request, c authn.Caller) {
+	var req pipeline.DelegationRequest
+	if err := json.NewDecoder(io.LimitReader(r.Body, s.maxBody())).Decode(&req); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "bad json: " + err.Error()})
+		return
+	}
+	if id, _ := req.Target["id"].(string); id == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "target.id is required"})
+		return
+	}
+	req.TraceID = r.Header.Get("X-Trace-Id")
+	res := s.Pipeline.Delegate(r.Context(), c, req)
+	code := http.StatusOK
+	if !res.Allow {
+		code = http.StatusForbidden
+	}
+	writeJSON(w, code, res)
 }
 
 func (s *Server) listTools(w http.ResponseWriter, r *http.Request, c authn.Caller) {

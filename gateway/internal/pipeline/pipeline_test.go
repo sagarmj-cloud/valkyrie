@@ -5,6 +5,7 @@ package pipeline
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -265,5 +266,108 @@ func TestHTTPAdapterTool(t *testing.T) {
 	}
 	if !strings.Contains(res.Content.Content[0].Text, "[REDACTED]") || strings.Contains(string(res.Content.StructuredContent), "555") {
 		t.Fatalf("redaction must apply to adapter results: %s %s", res.Content.Content[0].Text, res.Content.StructuredContent)
+	}
+}
+
+// ---------------------------------------------------------------- delegated authorization
+
+func leaseClaims(t *testing.T, tok string) map[string]any {
+	t.Helper()
+	parts := strings.Split(tok, ".")
+	if len(parts) != 3 {
+		t.Fatalf("not a jwt: %q", tok)
+	}
+	payload, err := base64.RawURLEncoding.DecodeString(parts[1])
+	if err != nil {
+		t.Fatal(err)
+	}
+	var c map[string]any
+	if err := json.Unmarshal(payload, &c); err != nil {
+		t.Fatal(err)
+	}
+	return c
+}
+
+func TestLeaseCarriesCallerSubjectAndTenant(t *testing.T) {
+	up := &fakeUpstream{result: mcpjson.CallToolResult{Content: []mcpjson.Content{{Type: "text", Text: `{}`}}}}
+	pdp := policy.Static{Fn: func(string, map[string]any) policy.Decision { return policy.Decision{Allow: true} }}
+	p := newP(t, pdp, credentials.NewSigned([]byte("k"), "test"), &audit.Memory{}, map[string]Executor{"orders": up})
+	res := p.Invoke(context.Background(), caller, "orders.create_cart", map[string]any{"items": []string{"x"}}, Context{})
+	if res.Status != StatusOK {
+		t.Fatalf("got %+v", res)
+	}
+	c := leaseClaims(t, up.seen)
+	if c["sub"] != caller.Subject || c["tenant_id"] != caller.TenantID {
+		t.Fatalf("upstream lease must identify the end user the call is for: %v", c)
+	}
+}
+
+type errPDP struct{}
+
+func (errPDP) Decide(context.Context, string, map[string]any) (policy.Decision, error) {
+	return policy.Decision{}, errors.New("opa down")
+}
+
+var supervisor = authn.Caller{AgentID: "concierge-01", AgentRole: "concierge", Subject: "jane", TenantID: "acme", Chain: []string{"root-01"}}
+
+func TestDelegateUsesVerifiedCallerAndChain(t *testing.T) {
+	var gotRule string
+	var gotInput map[string]any
+	pdp := policy.Static{Fn: func(rule string, in map[string]any) policy.Decision {
+		gotRule, gotInput = rule, in
+		return policy.Decision{Allow: true, PolicyVersion: "v1"}
+	}}
+	mem := &audit.Memory{}
+	p := newP(t, pdp, credentials.NewSigned([]byte("k"), "test"), mem, nil)
+	res := p.Delegate(context.Background(), supervisor, DelegationRequest{
+		Target:  map[string]any{"id": "menu-01", "tenant_id": "acme", "trust_level": 2},
+		Task:    map[string]any{"required_trust": 1, "est_tokens": 2000},
+		Budget:  map[string]any{"tokens_used": 10, "token_limit": 100},
+		Chain:   []string{"forged-by-caller"}, // must be ignored: the chain comes from the verified token
+		TraceID: "t9",
+	})
+	if !res.Allow || res.PolicyVersion != "v1" || res.TraceID != "t9" {
+		t.Fatalf("got %+v", res)
+	}
+	if gotRule != "valkyrie/delegation/decision" {
+		t.Fatalf("rule: %s", gotRule)
+	}
+	c := gotInput["caller"].(map[string]any)
+	if c["id"] != "concierge-01" || c["tenant_id"] != "acme" {
+		t.Fatalf("caller must come from the token: %v", c)
+	}
+	chain, _ := gotInput["chain"].([]string)
+	if len(chain) != 1 || chain[0] != "root-01" {
+		t.Fatalf("chain must come from the token, not the request: %v", gotInput["chain"])
+	}
+	if gotInput["target"].(map[string]any)["id"] != "menu-01" || gotInput["task"] == nil || gotInput["budget"] == nil {
+		t.Fatalf("target/task/budget must be passed through: %v", gotInput)
+	}
+	ev := mem.Snapshot()
+	if len(ev) != 1 || ev[0].Outcome != "ok" || ev[0].AgentID != "concierge-01" || ev[0].Tool != "delegate:menu-01" {
+		t.Fatalf("delegation must be audited: %+v", ev)
+	}
+}
+
+func TestDelegateDenyCarriesReasons(t *testing.T) {
+	pdp := policy.Static{Fn: func(string, map[string]any) policy.Decision {
+		return policy.Decision{Allow: false, DenyReason: []string{"delegation_loop"}, PolicyVersion: "v1"}
+	}}
+	mem := &audit.Memory{}
+	p := newP(t, pdp, credentials.NewSigned([]byte("k"), "test"), mem, nil)
+	res := p.Delegate(context.Background(), supervisor, DelegationRequest{Target: map[string]any{"id": "root-01"}})
+	if res.Allow || len(res.Reason) != 1 || res.Reason[0] != "delegation_loop" {
+		t.Fatalf("got %+v", res)
+	}
+	if ev := mem.Snapshot(); len(ev) != 1 || ev[0].Outcome != "denied" || ev[0].DenyReason[0] != "delegation_loop" {
+		t.Fatalf("audit: %+v", ev)
+	}
+}
+
+func TestDelegateFailsClosedWhenPDPUnavailable(t *testing.T) {
+	p := newP(t, errPDP{}, credentials.NewSigned([]byte("k"), "test"), &audit.Memory{}, nil)
+	res := p.Delegate(context.Background(), supervisor, DelegationRequest{Target: map[string]any{"id": "menu-01"}})
+	if res.Allow || len(res.Reason) != 1 || res.Reason[0] != "policy_unavailable" {
+		t.Fatalf("PDP error must deny: %+v", res)
 	}
 }

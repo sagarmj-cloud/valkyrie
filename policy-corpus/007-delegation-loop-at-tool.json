@@ -1,0 +1,8 @@
+{"name": "an agent already in its own delegation chain cannot act (loop)",
+ "rule": "valkyrie/tool_authz/decision",
+ "input": {"agent": {"id": "ordering-01", "role": "ordering"}, "principal": {"sub": "jane", "tenant_id": "acme"},
+           "chain": ["concierge-01", "menu-01", "ordering-01"],
+           "tool": {"name": "orders.create_cart", "risk_tier": 2, "data_classification": "confidential",
+                    "args": {"customer_id": "c-42", "items": ["Margherita Pizza"]}},
+           "customer": {"id": "c-42", "diet": "vegetarian", "allergens": [], "budget_usd": 25}},
+ "expect": {"allow": false, "deny_reason_contains": ["delegation_loop"]}}

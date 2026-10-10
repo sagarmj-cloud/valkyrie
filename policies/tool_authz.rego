@@ -45,6 +45,19 @@ deny_reason contains "tenant_mismatch" if {
 	input.tool.args.tenant_id != input.principal.tenant_id
 }
 
+# Delegation chain integrity (PEP 2, enforced on every tool call). The chain is
+# the list of agents that delegated down to the caller, taken from the verified
+# token. An agent that already appears in its own chain is a loop; a chain at
+# the depth limit may not act. Business rules for a handoff (trust, budget)
+# live in delegation.rego and are checked at /v1/delegate before the handoff.
+deny_reason contains "delegation_loop" if {
+	input.agent.id in input.chain
+}
+
+deny_reason contains "delegation_too_deep" if {
+	count(input.chain) >= data.limits.max_delegation_depth
+}
+
 # Fail closed: a cart without customer context cannot be checked, so it is denied.
 deny_reason contains "missing_customer_context" if {
 	input.tool.name == "orders.create_cart"

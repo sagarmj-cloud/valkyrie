@@ -50,6 +50,7 @@ class AgentState(TypedDict, total=False):
     pending_approval: dict[str, Any] | None
     approval: dict[str, Any] | None
     budget: dict[str, Any]
+    token_budget: dict[str, Any]      # for the delegation policy: tokens_used / token_limit
     chain: list[str]
     trace: list[dict[str, Any]]       # every gateway call, for the demo printout
     reply: str
@@ -75,6 +76,27 @@ def call(state: AgentState, role: str, tool: str, args: dict[str, Any], **ctx: A
     return res
 
 
+# Trust levels are a property of the agent fleet, not of a run; in production they
+# come from the registry's role bindings. required_trust is what the task needs.
+TRUST = {"menu-01": 2, "ordering-01": 3}
+
+
+def handoff(state: AgentState, role: str, target: str, required_trust: int = 1) -> bool:
+    """PEP 2: ask the gateway before delegating. The caller and its chain come from
+    the signed token, so a node cannot shorten or forge its own ancestry. A deny is
+    a normal result: the trace records it and the supervisor stops delegating."""
+    c = client_for(role, state)
+    try:
+        res = c.delegate({"id": target, "tenant_id": TENANT, "trust_level": TRUST.get(target, 1)},
+                         {"required_trust": required_trust, "est_tokens": 2000}, budget=state.get("token_budget"))
+    finally:
+        c.close()
+    state.setdefault("trace", []).append({"agent": role, "tool": f"delegate:{target}", "args": {},
+                                          "status": "ok" if res.allow else "denied", "reason": res.reason,
+                                          "redacted": [], "decision_id": res.decision_id})
+    return res.allow
+
+
 def customer_ctx(profile: dict[str, Any]) -> dict[str, Any]:
     """The slice of the profile the policy needs. Never the contact details."""
     return {"id": profile.get("customer_id"), "diet": profile.get("diet"), "allergens": profile.get("allergens", []),
@@ -88,8 +110,12 @@ def concierge(state: AgentState) -> dict[str, Any]:
     if not res.ok:
         return {"reply": f"Sorry — I couldn't load your profile ({res.as_tool_message()})", "trace": state["trace"]}
     profile = res.json()
-    return {"customer": profile, "customer_ctx": customer_ctx(profile), "chain": ["concierge-01"],
-            "budget": {"usd_used": 0.0, "usd_limit": 5.0}, "trace": state["trace"]}
+    out = {"customer": profile, "customer_ctx": customer_ctx(profile), "chain": ["concierge-01"],
+           "budget": {"usd_used": 0.0, "usd_limit": 5.0}, "token_budget": {"tokens_used": 0, "token_limit": 100000},
+           "trace": state["trace"]}
+    if not handoff({**state, **out}, "concierge", "menu-01"):
+        out["reply"] = "Sorry — I'm not allowed to hand this to the menu agent right now."
+    return out
 
 
 def menu_agent(state: AgentState) -> dict[str, Any]:
@@ -106,11 +132,16 @@ def menu_agent(state: AgentState) -> dict[str, Any]:
     items.sort(key=lambda m: (rank.get(m["item"], len(history)), m["price_usd"]))
     # Deliberately keep Pesto Pasta in front if present so the policy gate is exercised.
     items.sort(key=lambda m: m["item"] != "Pesto Pasta")
-    return {"candidates": items, "chain": state["chain"] + ["menu-01"], "trace": state["trace"]}
+    out = {"candidates": items, "chain": state["chain"] + ["menu-01"], "trace": state["trace"]}
+    if not handoff({**state, **out}, "menu", "ordering-01"):
+        out["candidates"], out["reply"] = [], "Sorry — I'm not allowed to hand this to the ordering agent right now."
+    return out
 
 
 def ordering_agent(state: AgentState) -> dict[str, Any]:
     """Try candidates in order. A deny is a normal result: read the reason, move on."""
+    if state.get("reply"):
+        return {}
     rejected: list[str] = []
     cart: dict[str, Any] | None = None
     for cand in state["candidates"]:

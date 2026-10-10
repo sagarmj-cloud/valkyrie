@@ -79,3 +79,55 @@ def test_server_verifies_signed_lease():
     assert asyncio.run(v.verify_token(jwt({**good, "exp": _t.time() - 120}))) is None     # expired
     assert asyncio.run(v.verify_token(jwt(good, key=b"other"))) is None                   # wrong key
     assert asyncio.run(v.verify_token("dev.orders:write.deadbeef")) is None               # old prefix tokens rejected
+
+
+def test_server_lease_exposes_end_user_identity():
+    import asyncio
+    import time as _t
+    from valkyrie.server import GatewayLeaseVerifier
+
+    def jwt(claims, key=b"k"):
+        h = base64.urlsafe_b64encode(json.dumps({"alg": "HS256"}).encode()).rstrip(b"=").decode()
+        p = base64.urlsafe_b64encode(json.dumps(claims).encode()).rstrip(b"=").decode()
+        sig = base64.urlsafe_b64encode(hmac.new(key, f"{h}.{p}".encode(), hashlib.sha256).digest()).rstrip(b"=").decode()
+        return f"{h}.{p}.{sig}"
+
+    v = GatewayLeaseVerifier("orders:write", key=b"k")
+    tok = asyncio.run(v.verify_token(jwt({"iss": "valkyrie", "scope": "orders:write", "lease_id": "lease-1",
+                                          "exp": _t.time() + 60, "sub": "jane.doe", "tenant_id": "acme"})))
+    assert tok is not None
+    assert tok.claims["sub"] == "jane.doe" and tok.claims["tenant_id"] == "acme"
+
+
+def test_client_delegate_returns_verdict():
+    seen = {}
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        seen["path"] = req.url.path
+        seen["body"] = json.loads(req.content)
+        if seen["body"]["target"]["id"] == "menu-01":
+            return httpx.Response(200, json={"allow": True, "policy_version": "v1", "trace_id": "t"})
+        return httpx.Response(403, json={"allow": False, "reason": ["delegation_loop"], "policy_version": "v1", "trace_id": "t"})
+
+    c = GatewayClient("http://gw", "tok")
+    c._http = httpx.Client(transport=httpx.MockTransport(handler), base_url="http://gw")
+    ok = c.delegate({"id": "menu-01", "tenant_id": "acme", "trust_level": 2}, {"required_trust": 1, "est_tokens": 10},
+                    budget={"tokens_used": 0, "token_limit": 100})
+    assert ok.allow and ok.reason == [] and seen["path"] == "/v1/delegate"
+    assert seen["body"]["target"]["id"] == "menu-01" and seen["body"]["task"]["est_tokens"] == 10 and seen["body"]["budget"]["token_limit"] == 100
+    denied = c.delegate({"id": "concierge-01", "tenant_id": "acme", "trust_level": 2}, {"required_trust": 1, "est_tokens": 10})
+    assert not denied.allow and denied.reason == ["delegation_loop"]
+
+
+def test_async_client_delegate_returns_verdict():
+    import asyncio
+    from valkyrie import AsyncGatewayClient
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        assert req.url.path == "/v1/delegate"
+        return httpx.Response(403, json={"allow": False, "reason": ["delegation_too_deep"], "trace_id": "t"})
+
+    c = AsyncGatewayClient("http://gw", "tok")
+    c._http = httpx.AsyncClient(transport=httpx.MockTransport(handler), base_url="http://gw")
+    res = asyncio.run(c.delegate({"id": "x"}, {"required_trust": 1}))
+    assert not res.allow and res.reason == ["delegation_too_deep"] and res.http_status == 403

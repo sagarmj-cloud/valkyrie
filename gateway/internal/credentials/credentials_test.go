@@ -98,3 +98,17 @@ func TestStaticAndNoneAndRouter(t *testing.T) {
 		t.Fatal("unknown type must fail")
 	}
 }
+
+func TestSignedLeaseCarriesSubjectAndTenant(t *testing.T) {
+	b := NewSigned([]byte("k"), "valkyrie")
+	l, err := b.Lease(context.Background(), Request{Scope: "orders:write", TTL: time.Minute, Subject: "jane", TenantID: "acme"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	payload, _ := base64.RawURLEncoding.DecodeString(strings.Split(l.Token, ".")[1])
+	var c map[string]any
+	json.Unmarshal(payload, &c)
+	if c["sub"] != "jane" || c["tenant_id"] != "acme" {
+		t.Fatalf("lease must carry the end user and tenant for downstream authz and audit: %v", c)
+	}
+}

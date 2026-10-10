@@ -260,7 +260,8 @@ func (p *Pipeline) Invoke(ctx context.Context, caller authn.Caller, tool string,
 	callCtx, cancel := context.WithTimeout(ctx, time.Duration(m.Limits.TimeoutMS)*time.Millisecond)
 	defer cancel()
 	lease, err := p.Broker.Lease(callCtx, credentials.Request{Type: m.Credentials.Type, VaultRole: m.Credentials.VaultRole,
-		Scope: m.Credentials.Scope, SecretRef: m.Credentials.SecretRef, TTL: time.Duration(m.Credentials.TTLSeconds) * time.Second})
+		Scope: m.Credentials.Scope, SecretRef: m.Credentials.SecretRef, TTL: time.Duration(m.Credentials.TTLSeconds) * time.Second,
+		Subject: caller.Subject, TenantID: caller.TenantID})
 	if err != nil {
 		res.Status, res.Reason, ev.Error = StatusUpstreamError, []string{"credential_broker: " + err.Error()}, err.Error()
 		return res
@@ -322,6 +323,68 @@ func (p *Pipeline) Invoke(ctx context.Context, caller authn.Caller, tool string,
 			_ = p.Store.Set(ctx, idemKey, b, ttl)
 		}
 	}
+	return res
+}
+
+// DelegationRequest is a supervisor asking whether it may hand a task to a
+// target agent (PEP 2). Target, Task and Budget are the policy's business
+// facts; the caller and the chain are taken from the verified token, never
+// from the request, so a caller cannot shorten or forge its own ancestry.
+type DelegationRequest struct {
+	Target  map[string]any `json:"target"`          // {id, tenant_id, trust_level}
+	Task    map[string]any `json:"task"`            // {required_trust, est_tokens}
+	Budget  map[string]any `json:"budget"`          // {tokens_used, token_limit}
+	Chain   []string       `json:"chain,omitempty"` // accepted on the wire, ignored
+	TraceID string         `json:"-"`
+}
+
+type DelegationResult struct {
+	Allow         bool     `json:"allow"`
+	Reason        []string `json:"reason,omitempty"`
+	DecisionID    string   `json:"decision_id,omitempty"`
+	PolicyVersion string   `json:"policy_version,omitempty"`
+	TraceID       string   `json:"trace_id"`
+}
+
+// Delegate evaluates valkyrie/delegation/decision for one handoff. Fail-closed
+// and audited like a tool call; the audit tool field is "delegate:<target id>".
+func (p *Pipeline) Delegate(ctx context.Context, caller authn.Caller, req DelegationRequest) DelegationResult {
+	start := time.Now()
+	targetID, _ := req.Target["id"].(string)
+	res := DelegationResult{TraceID: req.TraceID}
+	ev := audit.Event{Time: start, TraceID: req.TraceID, Tenant: caller.TenantID, Subject: caller.Subject,
+		AgentID: caller.AgentID, AgentRole: caller.AgentRole, Tool: "delegate:" + targetID, ArgsHash: audit.HashArgs(req.Target)}
+	defer func() {
+		ev.LatencyMS = float64(time.Since(start).Microseconds()) / 1000
+		if res.Allow {
+			ev.Outcome = string(StatusOK)
+		} else {
+			ev.Outcome = string(StatusDenied)
+		}
+		if p.Audit != nil {
+			p.Audit.Emit(ev)
+		}
+	}()
+	in := map[string]any{
+		"caller":    map[string]any{"id": caller.AgentID, "role": caller.AgentRole, "tenant_id": caller.TenantID},
+		"principal": map[string]any{"sub": caller.Subject, "tenant_id": caller.TenantID},
+		"target":    req.Target,
+		"task":      req.Task,
+		"chain":     caller.Chain,
+	}
+	if in["chain"] == nil {
+		in["chain"] = []string{}
+	}
+	if req.Budget != nil {
+		in["budget"] = req.Budget
+	}
+	d, err := p.PDP.Decide(ctx, "valkyrie/delegation/decision", in)
+	if err != nil {
+		res.Reason, ev.Error = []string{"policy_unavailable"}, err.Error()
+		return res
+	}
+	res.Allow, res.Reason, res.DecisionID, res.PolicyVersion = d.Allow, d.DenyReason, d.DecisionID, d.PolicyVersion
+	ev.DecisionID, ev.PolicyVersion, ev.DenyReason = d.DecisionID, d.PolicyVersion, d.DenyReason
 	return res
 }
 
