@@ -10,27 +10,15 @@ This guide covers how the pieces fit, how to run them, how to add a tool, a poli
 
 ## 1. Architecture in one page
 
-```
-                 ┌──────────── control plane: registryd (Go, :8090) ────────────┐
-                 │ manifests · servers · roles · change log · live contract test │
-                 │ GET /v1/registry (ETag)      GET /v1/bundle.tar.gz (signed)   │
-                 └──────────┬───────────────────────────────┬────────────────────┘
-                            │ polled every 30 s             │ polled every 5–15 s, signature verified
-                            ▼                               ▼
-clients (agents via SDK · IDE MCP clients) ──► gateway (Go, :8080) ◄── OPA sidecar (:8181)
-                                                │ 1 authenticate   OIDC/JWKS (+ HMAC in dev)
-                                                │ 2 resolve        registry snapshot · per-tenant rate limit
-                                                │ 3 validate       JSON Schema from the manifest
-                                                │ 4 ask OPA        valkyrie/tool_authz/decision (the verdict)
-                                                │ 5 lease          signed lease · Vault · static secret · none
-                                                │ 6 execute        MCP Streamable HTTP server  —or—  HTTP adapter (REST)
-                                                │ 7 post-process   redact · row cap · size cap · audit · metrics · revoke
-                                                ▼
-          first-party MCP servers (Python) · third-party MCP servers (any) · plain REST APIs ──► target systems
-```
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="img/pipeline.png">
+    <img src="img/pipeline.png" alt="How a tool call moves through Valkyrie: registryd publishes the registry snapshot (polled every 30 s) and the signed bundle (polled every 5–15 s, signature verified); callers invoke the gateway, which authenticates, resolves and rate-limits, validates, asks the OPA sidecar for a verdict, leases a credential, executes against an MCP server or HTTP adapter, then redacts, audits and revokes; targets are first-party MCP servers, third-party MCP servers and REST APIs in front of the target systems." width="1100">
+  </picture>
+</p>
 
 | Plane | Directory | Language | What lives there |
-|---|---|---|---|
+| --- | --- | --- | --- |
 | Control | `controlplane/` (registryd, valkyriectl), `registry/` | Go, stdlib only | Publishes manifests with a live contract test, binds roles, serves the registry snapshot to gateways and the signed OPA bundle to sidecars, keeps a change log |
 | Policy | `policies/` | Rego | `tool_authz` (PEP 3), `delegation` (PEP 2), `data_egress` (PEP 4), policy data, tests |
 | Data | `gateway/` | Go, stdlib only | The seven-step pipeline, both faces (`/v1/tools/invoke`, `/mcp`), rate limits, idempotency, metrics, audit |
@@ -155,7 +143,7 @@ valkyrie/
 registryd is the source of truth for what can be called. The gateway and OPA never read files; they poll registryd.
 
 | Endpoint | Who calls it | What it does |
-|---|---|---|
+| --- | --- | --- |
 | `PUT /v1/servers/{name}` | operators (`valkyriectl server add`) | register an MCP server or a logical name for an adapter |
 | `PUT /v1/tools/{name}` | operators / CI (`valkyriectl publish`) | validate the manifest, run the **live contract test**, store a new revision |
 | `DELETE /v1/tools/{name}` | operators | deprecate: removed from the snapshot, kept in history |
@@ -402,7 +390,7 @@ Running with a real model: the demo uses a deterministic planner so CI needs no 
 ### Two faces
 
 | Face | Path | Client | Context |
-|---|---|---|---|
+| --- | --- | --- | --- |
 | REST | `POST /v1/tools/invoke`, `GET /v1/tools` | `GatewayClient` | top-level `customer`, `approval`, `budget` |
 | MCP | `POST /mcp` (Streamable HTTP, JSON responses) | Claude Code, Cursor, any MCP client | `params._meta.{customer,approval,budget}` |
 
@@ -415,7 +403,7 @@ On the MCP face a policy deny is a tool result with `isError: true` and the reas
 ### Configuration
 
 | Variable | Default | Meaning |
-|---|---|---|
+| --- | --- | --- |
 | `VALKYRIE_LISTEN` | `:8080` | bind address |
 | `VALKYRIE_REGISTRY` | `registry.json` | path to the built registry |
 | `VALKYRIE_OPA_URL` | `http://127.0.0.1:8181` | OPA sidecar |
@@ -434,7 +422,7 @@ Every call emits one audit event (`internal/audit`) with `trace_id`, `decision_i
 What the dev stack stubs, and what replaces it.
 
 | Concern | Dev | Production |
-|---|---|---|
+| --- | --- | --- |
 | Caller identity | HS256 JWT from `mint_dev_token` | **Built:** `authn.JWKSVerifier` (RS256, issuer/audience/exp, JWKS cache with rate-limited refresh). Set `VALKYRIE_OIDC_ISSUER`, `VALKYRIE_OIDC_AUDIENCE`, `VALKYRIE_OIDC_JWKS_URL`; the agent service obtains an on-behalf-of token carrying `agent_id`/`agent_role`/`tenant_id`. mTLS peer identity is terminated at the ingress today. |
 | Credentials | `SignedBroker` with the dev lease key | **Built:** `SignedBroker` with a 32-byte random `VALKYRIE_LEASE_KEY` for first-party servers; `VaultBroker` (`VALKYRIE_VAULT_ADDR/TOKEN/MOUNT`) for dynamic secrets; `StaticBroker` for third-party API keys mounted into the gateway only. |
 | Policy delivery | registryd serves the signed bundle, HS256 | **Built:** same path; switch `keys.valkyrie-ci.algorithm` to RS256 and sign with a KMS-held private key; ship `decision_logs` to a collector instead of console |
@@ -453,7 +441,7 @@ Language guidance, in one paragraph: the gateway stays Go (goroutine per connect
 ## 11. Troubleshooting
 
 | Symptom | Likely cause | Fix |
-|---|---|---|
+| --- | --- | --- |
 | `denied` with `policy_unavailable` | OPA not reachable at `VALKYRIE_OPA_URL` | `curl localhost:8181/health`; check `.dev/opa.log` |
 | `denied` with `tool_not_bound_to_role` | tool missing from the role's list in `data.json` | add it; `opa test policies` |
 | `denied` with `missing_customer_context` on a cart | agent did not attach `customer` | pass `customer=` to `invoke`; check the state key is declared in the `TypedDict` |
