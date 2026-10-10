@@ -2,7 +2,7 @@
   "policy_version": "v2026.10.1",
   "approval_threshold_usd": 50,
   "roles": {
-    "concierge": { "tools": ["profile.get_preferences", "agents.delegate"], "max_tier": 1 },
+    "concierge": { "tools": ["profile.get_preferences"], "max_tier": 1, "can_delegate": true },
     "menu":      { "tools": ["menu.search_menu"], "max_tier": 0 },
     "ordering":  { "tools": ["orders.create_cart", "orders.place_order", "payments.charge", "delivery.quote_eta"], "max_tier": 3 }
   },

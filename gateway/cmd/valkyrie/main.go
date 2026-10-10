@@ -87,6 +87,9 @@ func main() {
 	if cfg.Env != "prod" {
 		verifiers = append(verifiers, authn.HMACVerifier{Secret: []byte(cfg.AuthSecret)})
 	}
+	// Specialist identities the gateway itself issued after an allowed handoff.
+	issuer := &authn.Issuer{Key: []byte(cfg.DelegationKey), TTL: cfg.DelegationTTL}
+	verifiers = append(verifiers, issuer)
 
 	// --- credential brokers
 	broker := credentials.Router{Signed: credentials.NewSigned([]byte(cfg.LeaseKey), "valkyrie"), Static: credentials.NewStatic(), None: credentials.NoneBroker{}}
@@ -109,7 +112,7 @@ func main() {
 
 	pdp := policy.NewOPA(cfg.OPAURL)
 	mets := metrics.New()
-	p := pipeline.New(pipeline.Options{Registry: reg, PDP: pdp, Broker: broker, Audit: sink, Store: st, Metrics: mets, Adapter: adapter, Log: log,
+	p := pipeline.New(pipeline.Options{Issuer: issuer, Registry: reg, PDP: pdp, Broker: broker, Audit: sink, Store: st, Metrics: mets, Adapter: adapter, Log: log,
 		Factory: func(name string, s registry.Server) pipeline.Executor {
 			return upstream.New(name, s.URL, upstream.Options{MaxInFlight: cfg.MaxInFlight})
 		}})

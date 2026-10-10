@@ -90,6 +90,8 @@ class DelegationResult:
     policy_version: str = ""
     trace_id: str = ""
     http_status: int = 0
+    token: str = ""          # the specialist's gateway-issued identity (only on allow)
+    expires_at: str = ""
 
     def as_tool_message(self) -> str:
         if self.allow:
@@ -154,7 +156,8 @@ class GatewayClient:
             return DelegationResult(allow=False, reason=[f"gateway returned {r.status_code}"], http_status=r.status_code)
         return DelegationResult(allow=bool(j.get("allow", False)), reason=list(j.get("reason") or []),
                                 decision_id=j.get("decision_id", ""), policy_version=j.get("policy_version", ""),
-                                trace_id=j.get("trace_id", ""), http_status=r.status_code)
+                                trace_id=j.get("trace_id", ""), http_status=r.status_code,
+                                token=j.get("token", ""), expires_at=j.get("expires_at", ""))
 
     # -- invocation ------------------------------------------------------
     def invoke(self, tool: str, args: dict[str, Any] | None = None, *, customer: dict[str, Any] | None = None,
@@ -240,7 +243,8 @@ class AsyncGatewayClient:
         j = r.json() if r.content else {}
         return DelegationResult(allow=bool(j.get("allow", False)), reason=list(j.get("reason") or []),
                                 decision_id=j.get("decision_id", ""), policy_version=j.get("policy_version", ""),
-                                trace_id=j.get("trace_id", ""), http_status=r.status_code)
+                                trace_id=j.get("trace_id", ""), http_status=r.status_code,
+                                token=j.get("token", ""), expires_at=j.get("expires_at", ""))
 
     async def aclose(self) -> None:
         await self._http.aclose()

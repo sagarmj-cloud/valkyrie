@@ -220,3 +220,42 @@ func keys(m map[string][]byte) []string {
 	}
 	return out
 }
+
+func TestRoleCanDelegateReachesTheBundle(t *testing.T) {
+	srv, _ := newServer(t)
+	if code, _, _ := req(t, srv, "PUT", "/v1/roles/concierge", map[string]any{"tools": []string{}, "max_tier": 1, "can_delegate": true}, nil); code != 200 {
+		t.Fatalf("role bind: %d", code)
+	}
+	if code, _, _ := req(t, srv, "PUT", "/v1/roles/menu", map[string]any{"tools": []string{}, "max_tier": 0}, nil); code != 200 {
+		t.Fatal("role bind")
+	}
+	_, roles, _ := req(t, srv, "GET", "/v1/roles", nil, nil)
+	if roles["concierge"].(map[string]any)["can_delegate"] != true || roles["menu"].(map[string]any)["can_delegate"] != false {
+		t.Fatalf("roles API must carry can_delegate: %v", roles)
+	}
+	// the OPA bundle's data.roles is what delegation.rego reads
+	r, _ := http.NewRequest("GET", srv.URL+"/v1/bundle.tar.gz", nil)
+	r.Header.Set("Authorization", "Bearer admin")
+	resp, err := http.DefaultClient.Do(r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	gz, _ := gzip.NewReader(resp.Body)
+	tr := tar.NewReader(gz)
+	var data map[string]any
+	for {
+		h, err := tr.Next()
+		if err == io.EOF {
+			break
+		}
+		if strings.HasSuffix(h.Name, "data.json") {
+			b, _ := io.ReadAll(tr)
+			json.Unmarshal(b, &data)
+		}
+	}
+	got := data["roles"].(map[string]any)["concierge"].(map[string]any)
+	if got["can_delegate"] != true {
+		t.Fatalf("bundle data.roles.concierge must carry can_delegate: %v", got)
+	}
+}

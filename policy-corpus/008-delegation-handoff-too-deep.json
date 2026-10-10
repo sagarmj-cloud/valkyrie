@@ -1,7 +1,7 @@
 {"name": "a supervisor at the depth limit may not delegate further",
  "rule": "valkyrie/delegation/decision",
  "input": {"caller": {"id": "d-04", "role": "concierge", "tenant_id": "acme"}, "principal": {"sub": "jane", "tenant_id": "acme"},
-           "target": {"id": "d-05", "tenant_id": "acme", "trust_level": 2},
+           "target": {"id": "d-05", "role": "menu", "tenant_id": "acme", "trust_level": 2},
            "task": {"required_trust": 1, "est_tokens": 100},
            "chain": ["d-00", "d-01", "d-02", "d-03"]},
  "expect": {"allow": false, "deny_reason_contains": ["delegation_too_deep"]}}

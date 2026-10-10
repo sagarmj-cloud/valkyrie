@@ -6,7 +6,7 @@
 //	valkyriectl server add <name> <url> [--runtime python|go|node|external]
 //	valkyriectl publish <manifest.json|.yaml> [--skip-contract]
 //	valkyriectl import-mcp <server-name> <url> --tier N --owner T --scope S [--prefix p] [--out dir] [--auth-env VAR]
-//	valkyriectl role bind <role> --max-tier N <tool>...
+//	valkyriectl role bind <role> --max-tier N [--can-delegate] <tool>...
 //	valkyriectl tools [--all]
 //	valkyriectl changes
 //	valkyriectl deprecate <tool>
@@ -79,7 +79,7 @@ valkyriectl — Valkyrie control plane CLI
   server add <name> <url> [--runtime R] [--owner O]
   publish <manifest.(json|yaml)> [--skip-contract]
   import-mcp <server> <url> --tier N --owner O --scope S [--prefix P] [--out DIR] [--auth-env VAR] [--classification C]
-  role bind <role> --max-tier N <tool>...
+  role bind <role> --max-tier N [--can-delegate] <tool>...
   tools [--all]
   changes
   deprecate <tool>`))
@@ -279,11 +279,12 @@ func cmdRole(args []string) error {
 	}
 	fs := flag.NewFlagSet("role bind", flag.ExitOnError)
 	maxTier := fs.Int("max-tier", 0, "maximum risk tier this role may call")
+	canDelegate := fs.Bool("can-delegate", false, "allow this role to hand tasks to other agents (PEP 2)")
 	fs.Parse(args[2:])
 	if fs.NArg() == 0 {
 		usage()
 	}
-	return call("PUT", "/v1/roles/"+args[1], store.Role{Tools: fs.Args(), MaxTier: *maxTier}, nil)
+	return call("PUT", "/v1/roles/"+args[1], store.Role{Tools: fs.Args(), MaxTier: *maxTier, CanDelegate: *canDelegate}, nil)
 }
 
 func cmdTools(args []string) error {

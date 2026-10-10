@@ -30,6 +30,10 @@ type Config struct {
 	OIDCIssuer   string
 	OIDCAudience string
 	OIDCJWKSURL  string
+	// Delegated tokens (PEP 2): the gateway signs a specialist's identity after
+	// an allowed handoff. Its own key and trust domain.
+	DelegationKey string
+	DelegationTTL time.Duration
 
 	// Credential brokers
 	LeaseKey        string // HS256 key shared with first-party servers
@@ -61,6 +65,8 @@ func FromEnv() Config {
 		OIDCIssuer:       get("VALKYRIE_OIDC_ISSUER", ""),
 		OIDCAudience:     get("VALKYRIE_OIDC_AUDIENCE", "valkyrie"),
 		OIDCJWKSURL:      get("VALKYRIE_OIDC_JWKS_URL", ""),
+		DelegationKey:    get("VALKYRIE_DELEGATION_KEY", "dev-delegation-key-change-me"),
+		DelegationTTL:    time.Duration(geti("VALKYRIE_DELEGATION_TTL_S", 900)) * time.Second,
 		LeaseKey:         get("VALKYRIE_LEASE_KEY", "dev-lease-key-change-me"),
 		VaultAddr:        get("VALKYRIE_VAULT_ADDR", ""),
 		VaultToken:       get("VALKYRIE_VAULT_TOKEN", ""),
@@ -89,6 +95,9 @@ func (c Config) Validate() error {
 	}
 	if c.LeaseKey == "dev-lease-key-change-me" || len(c.LeaseKey) < 32 {
 		errs = append(errs, "VALKYRIE_LEASE_KEY must be a random key of at least 32 bytes in prod")
+	}
+	if c.DelegationKey == "dev-delegation-key-change-me" || len(c.DelegationKey) < 32 {
+		errs = append(errs, "VALKYRIE_DELEGATION_KEY must be a random key of at least 32 bytes in prod (it signs specialist identities)")
 	}
 	if c.RedisAddr == "" {
 		errs = append(errs, "VALKYRIE_REDIS_ADDR is required in prod (idempotency and rate limits must be shared across replicas)")

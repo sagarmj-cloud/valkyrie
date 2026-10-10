@@ -371,3 +371,40 @@ func TestDelegateFailsClosedWhenPDPUnavailable(t *testing.T) {
 		t.Fatalf("PDP error must deny: %+v", res)
 	}
 }
+
+func TestDelegateIssuesChildTokenOnlyOnAllow(t *testing.T) {
+	iss := &authn.Issuer{Key: []byte("dk"), TTL: time.Minute}
+	allow := policy.Static{Fn: func(string, map[string]any) policy.Decision { return policy.Decision{Allow: true, DecisionID: "dec-1"} }}
+	p := newP(t, allow, credentials.NewSigned([]byte("k"), "test"), &audit.Memory{}, nil)
+	p.Issuer = iss
+	res := p.Delegate(context.Background(), supervisor, DelegationRequest{Target: map[string]any{"id": "menu-01", "role": "menu", "tenant_id": "acme", "trust_level": 2}})
+	if !res.Allow || res.Token == "" || res.ExpiresAt.IsZero() {
+		t.Fatalf("allow must issue a token: %+v", res)
+	}
+	r := httptest.NewRequest("POST", "/", nil)
+	r.Header.Set("Authorization", "Bearer "+res.Token)
+	child, err := iss.Verify(r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if child.AgentID != "menu-01" || child.AgentRole != "menu" || child.Subject != "jane" || child.TenantID != "acme" ||
+		len(child.Chain) != 2 || child.Chain[0] != "root-01" || child.Chain[1] != "concierge-01" {
+		t.Fatalf("child identity: %+v", child)
+	}
+
+	deny := policy.Static{Fn: func(string, map[string]any) policy.Decision {
+		return policy.Decision{Allow: false, DenyReason: []string{"insufficient_trust"}}
+	}}
+	p2 := newP(t, deny, credentials.NewSigned([]byte("k"), "test"), &audit.Memory{}, nil)
+	p2.Issuer = iss
+	res = p2.Delegate(context.Background(), supervisor, DelegationRequest{Target: map[string]any{"id": "menu-01", "role": "menu"}})
+	if res.Allow || res.Token != "" {
+		t.Fatalf("deny must not issue a token: %+v", res)
+	}
+
+	// a target without a role cannot be issued an identity, even if the policy would allow
+	res = p.Delegate(context.Background(), supervisor, DelegationRequest{Target: map[string]any{"id": "menu-01"}})
+	if res.Allow || res.Token != "" || len(res.Reason) != 1 || res.Reason[0] != "target_role_required" {
+		t.Fatalf("missing role must deny: %+v", res)
+	}
+}

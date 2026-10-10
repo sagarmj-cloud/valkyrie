@@ -91,6 +91,9 @@ type Pipeline struct {
 	Metrics  *metrics.Registry
 	Adapter  Adapter
 	Log      *slog.Logger
+	// Issuer mints the specialist's token after an allowed handoff (PEP 2).
+	// nil disables issuance: Delegate still gives a verdict, without a token.
+	Issuer *authn.Issuer
 
 	// Upstreams maps server name -> executor. UpstreamFactory builds one on
 	// first use for servers that appear after startup (registry refresh).
@@ -110,6 +113,7 @@ type Options struct {
 	Metrics  *metrics.Registry
 	Adapter  Adapter
 	Log      *slog.Logger
+	Issuer   *authn.Issuer
 	Factory  func(name string, s registry.Server) Executor
 }
 
@@ -127,7 +131,7 @@ func New(o Options) *Pipeline {
 		o.Adapter = upstream.NewHTTPAdapter()
 	}
 	return &Pipeline{Registry: o.Registry, PDP: o.PDP, Broker: o.Broker, Audit: o.Audit, Store: o.Store,
-		Limiter: ratelimit.New(o.Store), Metrics: o.Metrics, Adapter: o.Adapter, Log: o.Log,
+		Limiter: ratelimit.New(o.Store), Metrics: o.Metrics, Adapter: o.Adapter, Log: o.Log, Issuer: o.Issuer,
 		Upstreams: map[string]Executor{}, UpstreamFactory: o.Factory}
 }
 
@@ -331,7 +335,7 @@ func (p *Pipeline) Invoke(ctx context.Context, caller authn.Caller, tool string,
 // facts; the caller and the chain are taken from the verified token, never
 // from the request, so a caller cannot shorten or forge its own ancestry.
 type DelegationRequest struct {
-	Target  map[string]any `json:"target"`          // {id, tenant_id, trust_level}
+	Target  map[string]any `json:"target"`          // {id, role, tenant_id, trust_level}
 	Task    map[string]any `json:"task"`            // {required_trust, est_tokens}
 	Budget  map[string]any `json:"budget"`          // {tokens_used, token_limit}
 	Chain   []string       `json:"chain,omitempty"` // accepted on the wire, ignored
@@ -344,6 +348,12 @@ type DelegationResult struct {
 	DecisionID    string   `json:"decision_id,omitempty"`
 	PolicyVersion string   `json:"policy_version,omitempty"`
 	TraceID       string   `json:"trace_id"`
+	// Token is the specialist's identity, issued only on allow: the parent's
+	// end user and tenant, the target's id and role, the chain extended by the
+	// parent. The specialist calls the gateway with it; it cannot be minted
+	// by an agent service.
+	Token     string    `json:"token,omitempty"`
+	ExpiresAt time.Time `json:"expires_at,omitzero"`
 }
 
 // Delegate evaluates valkyrie/delegation/decision for one handoff. Fail-closed
@@ -365,6 +375,12 @@ func (p *Pipeline) Delegate(ctx context.Context, caller authn.Caller, req Delega
 			p.Audit.Emit(ev)
 		}
 	}()
+	targetRole, _ := req.Target["role"].(string)
+	if p.Issuer != nil && targetRole == "" {
+		res.Reason = []string{"target_role_required"}
+		ev.DenyReason = res.Reason
+		return res
+	}
 	in := map[string]any{
 		"caller":    map[string]any{"id": caller.AgentID, "role": caller.AgentRole, "tenant_id": caller.TenantID},
 		"principal": map[string]any{"sub": caller.Subject, "tenant_id": caller.TenantID},
@@ -385,6 +401,15 @@ func (p *Pipeline) Delegate(ctx context.Context, caller authn.Caller, req Delega
 	}
 	res.Allow, res.Reason, res.DecisionID, res.PolicyVersion = d.Allow, d.DenyReason, d.DecisionID, d.PolicyVersion
 	ev.DecisionID, ev.PolicyVersion, ev.DenyReason = d.DecisionID, d.PolicyVersion, d.DenyReason
+	if res.Allow && p.Issuer != nil {
+		tok, exp, err := p.Issuer.Issue(caller, targetID, targetRole, d.DecisionID)
+		if err != nil {
+			// Fail closed: an allow we cannot turn into an identity is not an allow.
+			res.Allow, res.Reason, ev.Error = false, []string{"delegation_issuer: " + err.Error()}, err.Error()
+			return res
+		}
+		res.Token, res.ExpiresAt = tok, exp
+	}
 	return res
 }
 

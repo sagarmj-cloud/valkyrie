@@ -12,6 +12,7 @@ func TestProdRefusesDevDefaults(t *testing.T) {
 		t.Fatal("prod with dev defaults must fail validation")
 	}
 	c.OIDCJWKSURL, c.LeaseKey, c.RedisAddr, c.AdapterAllow = "https://idp/jwks", "0123456789abcdef0123456789abcdef", "redis:6379", []string{"weather.internal"}
+	c.DelegationKey = "fedcba9876543210fedcba9876543210"
 	if err := c.Validate(); err != nil {
 		t.Fatalf("valid prod config rejected: %v", err)
 	}
@@ -26,6 +27,7 @@ func TestProdRequiresOIDCEvenWithCustomHMACSecret(t *testing.T) {
 	c := FromEnv()
 	c.Env = "prod"
 	c.LeaseKey, c.RedisAddr, c.AdapterAllow = "0123456789abcdef0123456789abcdef", "redis:6379", []string{"weather.internal"}
+	c.DelegationKey = "fedcba9876543210fedcba9876543210"
 	c.AuthSecret, c.OIDCJWKSURL = "a-strong-custom-secret-that-is-not-default", ""
 	if err := c.Validate(); err == nil {
 		t.Fatal("prod must not accept self-minted HMAC tokens as the only identity: subject and chain would be unattested")
@@ -33,5 +35,18 @@ func TestProdRequiresOIDCEvenWithCustomHMACSecret(t *testing.T) {
 	c.OIDCJWKSURL = "https://idp/jwks"
 	if err := c.Validate(); err != nil {
 		t.Fatalf("prod with OIDC rejected: %v", err)
+	}
+}
+
+func TestProdRequiresDelegationKey(t *testing.T) {
+	c := FromEnv()
+	c.Env = "prod"
+	c.OIDCJWKSURL, c.LeaseKey, c.RedisAddr, c.AdapterAllow = "https://idp/jwks", "0123456789abcdef0123456789abcdef", "redis:6379", []string{"h"}
+	if err := c.Validate(); err == nil {
+		t.Fatal("prod with the default delegation key must fail: anyone could mint specialist identities")
+	}
+	c.DelegationKey = "0123456789abcdef0123456789abcdef"
+	if err := c.Validate(); err != nil {
+		t.Fatalf("valid prod config rejected: %v", err)
 	}
 }

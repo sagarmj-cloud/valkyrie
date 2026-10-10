@@ -86,6 +86,9 @@ type Role struct {
 	Name    string   `json:"name"`
 	Tools   []string `json:"tools"`
 	MaxTier int      `json:"max_tier"`
+	// CanDelegate grants PEP 2: the role may hand tasks to other agents via
+	// the gateway's /v1/delegate. Carried into the bundle as roles[<role>].can_delegate.
+	CanDelegate bool `json:"can_delegate"`
 }
 
 type Change struct {
@@ -275,7 +278,7 @@ func (s *Store) PutRole(actor string, r Role) error {
 	}
 	sort.Strings(r.Tools)
 	s.st.Roles[r.Name] = r
-	return s.commit(actor, "role", r.Name, "bind", fmt.Sprintf("%s -> %d tools, max_tier=%d", r.Name, len(r.Tools), r.MaxTier))
+	return s.commit(actor, "role", r.Name, "bind", fmt.Sprintf("%s -> %d tools, max_tier=%d, can_delegate=%v", r.Name, len(r.Tools), r.MaxTier, r.CanDelegate))
 }
 
 func (s *Store) Roles() map[string]Role {

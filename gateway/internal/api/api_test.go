@@ -62,7 +62,9 @@ func testServer(t *testing.T) (*httptest.Server, string) {
 	}}
 	p := pipeline.New(pipeline.Options{Registry: reg, PDP: pdp, Broker: credentials.NewSigned([]byte("k"), "t"), Audit: &audit.Memory{}, Metrics: metrics.New()})
 	p.SetUpstream("orders", okUpstream{})
-	s := &Server{Verifier: authn.HMACVerifier{Secret: []byte("s")}, Pipeline: p, Log: slog.New(slog.NewTextHandler(discard{}, nil)),
+	iss := &authn.Issuer{Key: []byte("dk"), TTL: time.Minute}
+	p.Issuer = iss
+	s := &Server{Verifier: authn.Chain{authn.HMACVerifier{Secret: []byte("s")}, iss}, Pipeline: p, Log: slog.New(slog.NewTextHandler(discard{}, nil)),
 		Metrics: p.Metrics.Handler(), Ready: func(context.Context) error { return nil }}
 	srv := httptest.NewServer(s.Handler())
 	t.Cleanup(srv.Close)
@@ -179,7 +181,7 @@ func TestDelegateEndpointUsesTokenChain(t *testing.T) {
 	tok, _ := authn.Sign([]byte("s"), map[string]any{"sub": "jane", "tenant_id": "acme", "agent_id": "c1", "agent_role": "concierge",
 		"chain": []string{"menu-01"}, "exp": time.Now().Add(time.Hour).Unix()})
 	// The body claims an empty chain; the gateway must ignore it and deny the loop.
-	resp, out := do(t, srv, tok, "POST", "/v1/delegate", `{"target":{"id":"menu-01","tenant_id":"acme","trust_level":2},"task":{"required_trust":1,"est_tokens":10},"chain":[]}`)
+	resp, out := do(t, srv, tok, "POST", "/v1/delegate", `{"target":{"id":"menu-01","role":"menu","tenant_id":"acme","trust_level":2},"task":{"required_trust":1,"est_tokens":10},"chain":[]}`)
 	if resp.StatusCode != http.StatusForbidden || out["allow"] != false {
 		t.Fatalf("status=%d body=%v", resp.StatusCode, out)
 	}
@@ -187,7 +189,7 @@ func TestDelegateEndpointUsesTokenChain(t *testing.T) {
 		t.Fatalf("reason: %v", out["reason"])
 	}
 	// A fresh target is allowed.
-	resp, out = do(t, srv, tok, "POST", "/v1/delegate", `{"target":{"id":"ordering-01","tenant_id":"acme","trust_level":2},"task":{"required_trust":1,"est_tokens":10}}`)
+	resp, out = do(t, srv, tok, "POST", "/v1/delegate", `{"target":{"id":"ordering-01","role":"ordering","tenant_id":"acme","trust_level":2},"task":{"required_trust":1,"est_tokens":10}}`)
 	if resp.StatusCode != http.StatusOK || out["allow"] != true {
 		t.Fatalf("status=%d body=%v", resp.StatusCode, out)
 	}
@@ -195,5 +197,26 @@ func TestDelegateEndpointUsesTokenChain(t *testing.T) {
 	resp, _ = do(t, srv, tok, "POST", "/v1/delegate", `{"task":{}}`)
 	if resp.StatusCode != http.StatusBadRequest {
 		t.Fatalf("missing target must be 400, got %d", resp.StatusCode)
+	}
+}
+
+func TestDelegatedTokenAuthenticatesTheSpecialist(t *testing.T) {
+	srv, tok := testServer(t)
+	resp, out := do(t, srv, tok, "POST", "/v1/delegate", `{"target":{"id":"menu-01","role":"menu","tenant_id":"acme","trust_level":2},"task":{"required_trust":1,"est_tokens":10}}`)
+	if resp.StatusCode != http.StatusOK || out["allow"] != true {
+		t.Fatalf("status=%d body=%v", resp.StatusCode, out)
+	}
+	child, _ := out["token"].(string)
+	if child == "" {
+		t.Fatalf("allow must return a delegated token: %v", out)
+	}
+	// The specialist uses the gateway-issued token. It is authenticated as menu-01/menu and sees only menu tools.
+	resp, out = do(t, srv, child, "GET", "/v1/tools", "")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("delegated token rejected: %d %v", resp.StatusCode, out)
+	}
+	tools, _ := out["tools"].([]any)
+	if len(tools) != 1 || tools[0].(map[string]any)["name"] != "menu.search_menu" {
+		t.Fatalf("specialist must be scoped to its role's tools: %v", out["tools"])
 	}
 }

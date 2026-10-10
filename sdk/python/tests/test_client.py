@@ -131,3 +131,15 @@ def test_async_client_delegate_returns_verdict():
     c._http = httpx.AsyncClient(transport=httpx.MockTransport(handler), base_url="http://gw")
     res = asyncio.run(c.delegate({"id": "x"}, {"required_trust": 1}))
     assert not res.allow and res.reason == ["delegation_too_deep"] and res.http_status == 403
+
+
+def test_client_delegate_returns_child_token():
+    def handler(req: httpx.Request) -> httpx.Response:
+        body = json.loads(req.content)
+        assert body["target"]["role"] == "menu"
+        return httpx.Response(200, json={"allow": True, "token": "child.jwt.sig", "expires_at": "2026-10-10T23:59:00Z", "trace_id": "t"})
+
+    c = GatewayClient("http://gw", "tok")
+    c._http = httpx.Client(transport=httpx.MockTransport(handler), base_url="http://gw")
+    res = c.delegate({"id": "menu-01", "role": "menu", "tenant_id": "acme", "trust_level": 2}, {"required_trust": 1, "est_tokens": 10})
+    assert res.allow and res.token == "child.jwt.sig" and res.expires_at == "2026-10-10T23:59:00Z"

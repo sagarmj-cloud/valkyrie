@@ -51,14 +51,20 @@ class AgentState(TypedDict, total=False):
     approval: dict[str, Any] | None
     budget: dict[str, Any]
     token_budget: dict[str, Any]      # for the delegation policy: tokens_used / token_limit
+    tokens: dict[str, str]            # role -> gateway-issued delegated token (specialists never mint their own)
     chain: list[str]
     trace: list[dict[str, Any]]       # every gateway call, for the demo printout
     reply: str
 
 
 def client_for(role: str, state: AgentState) -> GatewayClient:
-    token = mint_dev_token(SECRET, sub=state["user"], tenant_id=TENANT, agent_id=f"{role}-01", agent_role=role,
-                           chain=state.get("chain", []))
+    """The supervisor's token is the on-behalf-of token (dev: minted; production:
+    from the IdP). A specialist's token was issued by the gateway at the handoff
+    and already carries the end user and the attested chain."""
+    token = state.get("tokens", {}).get(role)
+    if token is None:
+        token = mint_dev_token(SECRET, sub=state["user"], tenant_id=TENANT, agent_id=f"{role}-01", agent_role=role,
+                               chain=state.get("chain", []))
     return GatewayClient(GATEWAY, token, trace_id=state["run_id"])
 
 
@@ -81,20 +87,21 @@ def call(state: AgentState, role: str, tool: str, args: dict[str, Any], **ctx: A
 TRUST = {"menu-01": 2, "ordering-01": 3}
 
 
-def handoff(state: AgentState, role: str, target: str, required_trust: int = 1) -> bool:
+def handoff(state: AgentState, role: str, target: str, target_role: str, required_trust: int = 1) -> str | None:
     """PEP 2: ask the gateway before delegating. The caller and its chain come from
-    the signed token, so a node cannot shorten or forge its own ancestry. A deny is
-    a normal result: the trace records it and the supervisor stops delegating."""
+    the signed token, so a node cannot shorten or forge its own ancestry. On allow
+    the gateway issues the specialist's token (end user, target role, chain + caller);
+    on deny there is no token, so an unapproved handoff cannot act at all."""
     c = client_for(role, state)
     try:
-        res = c.delegate({"id": target, "tenant_id": TENANT, "trust_level": TRUST.get(target, 1)},
+        res = c.delegate({"id": target, "role": target_role, "tenant_id": TENANT, "trust_level": TRUST.get(target, 1)},
                          {"required_trust": required_trust, "est_tokens": 2000}, budget=state.get("token_budget"))
     finally:
         c.close()
     state.setdefault("trace", []).append({"agent": role, "tool": f"delegate:{target}", "args": {},
                                           "status": "ok" if res.allow else "denied", "reason": res.reason,
                                           "redacted": [], "decision_id": res.decision_id})
-    return res.allow
+    return res.token if res.allow else None
 
 
 def customer_ctx(profile: dict[str, Any]) -> dict[str, Any]:
@@ -112,9 +119,14 @@ def concierge(state: AgentState) -> dict[str, Any]:
     profile = res.json()
     out = {"customer": profile, "customer_ctx": customer_ctx(profile), "chain": ["concierge-01"],
            "budget": {"usd_used": 0.0, "usd_limit": 5.0}, "token_budget": {"tokens_used": 0, "token_limit": 100000},
-           "trace": state["trace"]}
-    if not handoff({**state, **out}, "concierge", "menu-01"):
-        out["reply"] = "Sorry — I'm not allowed to hand this to the menu agent right now."
+           "trace": state["trace"], "tokens": {}}
+    # The supervisor fans out: each specialist gets its own gateway-issued identity.
+    for target, role in (("menu-01", "menu"), ("ordering-01", "ordering")):
+        tok = handoff({**state, **out}, "concierge", target, role)
+        if tok is None:
+            out["reply"] = f"Sorry — I'm not allowed to hand this to the {role} agent right now."
+            return out
+        out["tokens"][role] = tok
     return out
 
 
@@ -132,10 +144,7 @@ def menu_agent(state: AgentState) -> dict[str, Any]:
     items.sort(key=lambda m: (rank.get(m["item"], len(history)), m["price_usd"]))
     # Deliberately keep Pesto Pasta in front if present so the policy gate is exercised.
     items.sort(key=lambda m: m["item"] != "Pesto Pasta")
-    out = {"candidates": items, "chain": state["chain"] + ["menu-01"], "trace": state["trace"]}
-    if not handoff({**state, **out}, "menu", "ordering-01"):
-        out["candidates"], out["reply"] = [], "Sorry — I'm not allowed to hand this to the ordering agent right now."
-    return out
+    return {"candidates": items, "trace": state["trace"]}
 
 
 def ordering_agent(state: AgentState) -> dict[str, Any]:
@@ -171,7 +180,7 @@ def ordering_agent(state: AgentState) -> dict[str, Any]:
 
     eta = call(state, "ordering", "delivery.quote_eta", {"order_id": order_j["order_id"]})
     return {"cart": cart, "order": order_j, "charge": charge.json(), "eta": eta.json() if eta.ok else {},
-            "rejected": rejected, "chain": state["chain"] + ["ordering-01"], "trace": state["trace"]}
+            "rejected": rejected, "trace": state["trace"]}
 
 
 def approval(state: AgentState) -> dict[str, Any]:

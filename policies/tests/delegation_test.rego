@@ -7,8 +7,8 @@ import rego.v1
 import data.valkyrie.delegation
 
 ok := {
-	"caller": {"id": "concierge-01", "tenant_id": "acme"},
-	"target": {"id": "menu-01", "tenant_id": "acme", "trust_level": 2},
+	"caller": {"id": "concierge-01", "role": "concierge", "tenant_id": "acme"},
+	"target": {"id": "menu-01", "role": "menu", "tenant_id": "acme", "trust_level": 2},
 	"task": {"required_trust": 1, "est_tokens": 2000},
 	"chain": ["concierge-01"],
 	"budget": {"tokens_used": 10000, "token_limit": 100000},
@@ -34,4 +34,18 @@ test_cross_tenant_denied if {
 test_token_budget_denied if {
 	inp := object.union(ok, {"budget": {"tokens_used": 99000, "token_limit": 100000}})
 	"token_budget_exceeded" in delegation.deny_reason with input as inp
+}
+
+# Only roles granted can_delegate in the registry may hand work to other agents.
+test_role_without_delegate_binding_denied if {
+	inp := object.union(ok, {"caller": {"id": "menu-01", "role": "menu", "tenant_id": "acme"}})
+	not delegation.allow with input as inp
+	"caller_may_not_delegate" in delegation.deny_reason with input as inp
+}
+
+# The gateway issues the target an identity with this role; it must be a known role.
+test_unknown_target_role_denied if {
+	inp := object.union(ok, {"target": {"id": "x-01", "role": "ghost", "tenant_id": "acme", "trust_level": 2}})
+	not delegation.allow with input as inp
+	"unknown_target_role" in delegation.deny_reason with input as inp
 }

@@ -53,7 +53,7 @@ step "publish the REST tool: an HTTP-adapter manifest, no MCP server involved"
 
 step "bind a new 'analyst' role to the imported tools + weather, and give the concierge weather too"
 "$CTL" role bind analyst --max-tier 1 everything.get_sum everything.echo weather.forecast
-"$CTL" role bind concierge --max-tier 1 profile.get_preferences weather.forecast
+"$CTL" role bind concierge --can-delegate --max-tier 1 profile.get_preferences weather.forecast
 
 step "wait for OPA to pull the new signed bundle and the gateway to poll the new snapshot (no restarts)"
 REV=$(curl -s -H "Authorization: Bearer dev-reader-token" http://127.0.0.1:8090/v1/registry | python3 -c "import sys,json;print(json.load(sys.stdin)['revision'])")

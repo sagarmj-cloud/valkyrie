@@ -32,10 +32,11 @@ def main() -> int:
         print(f"published {m['name']}@{m['version']} — {'; '.join(r.json()['contract'].get('checked', []))}")
     roles = json.loads((ROOT / "policies" / "data.json").read_text())["roles"]
     for name, role in roles.items():
-        tools = [t for t in role["tools"] if not t.startswith("agents.")]  # agents.delegate is virtual (PEP 2)
-        r = c.put(f"/v1/roles/{name}", json={"tools": tools, "max_tier": role["max_tier"]})
+        tools = role["tools"]
+        r = c.put(f"/v1/roles/{name}", json={"tools": tools, "max_tier": role["max_tier"],
+                                              "can_delegate": bool(role.get("can_delegate", False))})
         r.raise_for_status()
-        print(f"bound role {name}: {len(tools)} tools, max_tier={role['max_tier']}")
+        print(f"bound role {name}: {len(tools)} tools, max_tier={role['max_tier']}, can_delegate={bool(role.get('can_delegate', False))}")
     rev = c.get("/v1/registry").json()["revision"]
     print(f"registry revision {rev}")
     return 0

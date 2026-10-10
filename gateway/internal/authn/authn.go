@@ -48,25 +48,43 @@ type HMACVerifier struct {
 }
 
 func (h HMACVerifier) Verify(r *http.Request) (Caller, error) {
+	now := time.Now
+	if h.Now != nil {
+		now = h.Now
+	}
+	c, iss, err := verifyHS256(h.Secret, r, now)
+	if err != nil {
+		return Caller{}, err
+	}
+	if iss == DelegatedIssuer {
+		return Caller{}, fmt.Errorf("%w: delegated token presented to the dev verifier", ErrUnauthenticated)
+	}
+	return c, nil
+}
+
+// verifyHS256 checks the bearer token's signature, expiry and required claims
+// and returns the caller plus the iss claim for the verifier to judge.
+func verifyHS256(secret []byte, r *http.Request, now func() time.Time) (Caller, string, error) {
 	auth := r.Header.Get("Authorization")
 	if !strings.HasPrefix(auth, "Bearer ") {
-		return Caller{}, fmt.Errorf("%w: missing bearer token", ErrUnauthenticated)
+		return Caller{}, "", fmt.Errorf("%w: missing bearer token", ErrUnauthenticated)
 	}
 	parts := strings.Split(strings.TrimPrefix(auth, "Bearer "), ".")
 	if len(parts) != 3 {
-		return Caller{}, fmt.Errorf("%w: malformed token", ErrUnauthenticated)
+		return Caller{}, "", fmt.Errorf("%w: malformed token", ErrUnauthenticated)
 	}
-	mac := hmac.New(sha256.New, h.Secret)
+	mac := hmac.New(sha256.New, secret)
 	mac.Write([]byte(parts[0] + "." + parts[1]))
 	want := base64.RawURLEncoding.EncodeToString(mac.Sum(nil))
 	if !hmac.Equal([]byte(want), []byte(parts[2])) {
-		return Caller{}, fmt.Errorf("%w: bad signature", ErrUnauthenticated)
+		return Caller{}, "", fmt.Errorf("%w: bad signature", ErrUnauthenticated)
 	}
 	payload, err := base64.RawURLEncoding.DecodeString(parts[1])
 	if err != nil {
-		return Caller{}, fmt.Errorf("%w: bad payload", ErrUnauthenticated)
+		return Caller{}, "", fmt.Errorf("%w: bad payload", ErrUnauthenticated)
 	}
 	var claims struct {
+		Iss       string   `json:"iss"`
 		Sub       string   `json:"sub"`
 		TenantID  string   `json:"tenant_id"`
 		AgentID   string   `json:"agent_id"`
@@ -75,19 +93,15 @@ func (h HMACVerifier) Verify(r *http.Request) (Caller, error) {
 		Exp       int64    `json:"exp"`
 	}
 	if err := json.Unmarshal(payload, &claims); err != nil {
-		return Caller{}, fmt.Errorf("%w: bad claims", ErrUnauthenticated)
-	}
-	now := time.Now
-	if h.Now != nil {
-		now = h.Now
+		return Caller{}, "", fmt.Errorf("%w: bad claims", ErrUnauthenticated)
 	}
 	if claims.Exp != 0 && now().Unix() > claims.Exp {
-		return Caller{}, fmt.Errorf("%w: token expired", ErrUnauthenticated)
+		return Caller{}, "", fmt.Errorf("%w: token expired", ErrUnauthenticated)
 	}
 	if claims.Sub == "" || claims.TenantID == "" || claims.AgentID == "" || claims.AgentRole == "" {
-		return Caller{}, fmt.Errorf("%w: missing required claims", ErrUnauthenticated)
+		return Caller{}, "", fmt.Errorf("%w: missing required claims", ErrUnauthenticated)
 	}
-	return Caller{AgentID: claims.AgentID, AgentRole: claims.AgentRole, Subject: claims.Sub, TenantID: claims.TenantID, Chain: claims.Chain}, nil
+	return Caller{AgentID: claims.AgentID, AgentRole: claims.AgentRole, Subject: claims.Sub, TenantID: claims.TenantID, Chain: claims.Chain}, claims.Iss, nil
 }
 
 // Sign mints an HS256 token. Used by the dev SDK and tests only.

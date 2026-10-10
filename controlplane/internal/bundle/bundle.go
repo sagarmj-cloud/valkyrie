@@ -60,7 +60,7 @@ func (b *Builder) Build(st *store.Store) (Built, error) {
 	}
 	roles := map[string]any{}
 	for name, r := range st.Roles() {
-		roles[name] = map[string]any{"tools": r.Tools, "max_tier": r.MaxTier}
+		roles[name] = map[string]any{"tools": r.Tools, "max_tier": r.MaxTier, "can_delegate": r.CanDelegate}
 	}
 	if len(roles) > 0 {
 		data["roles"] = roles
