@@ -377,7 +377,84 @@ Running with a real model: the demo uses a deterministic planner so CI needs no 
 
 ---
 
-## 9. The gateway internals
+## 9. Delegated authorization
+
+A tool call in a multi-agent system is never just "agent X calls tool Y". A user asked for something, a supervisor agent took it on, a specialist got a piece of it, and the specialist is now calling a tool. Delegated authorization means every one of those hops is carried, attested and narrowed: the tool call is made *by* an agent, *for* a user, *through* a chain the platform can vouch for, and no hop can gain rights its parent did not have. This section is the whole model in one place.
+
+### Three identities on every call
+
+| Identity | Claims | Where it comes from |
+|---|---|---|
+| **End user** (the subject) | `sub`, `tenant_id` | The IdP's on-behalf-of token. Never changes down the chain. |
+| **Agent** (the actor) | `agent_id`, `agent_role` | The IdP token for the supervisor; a gateway-issued token for every specialist. |
+| **Chain** | `chain` (agent ids, root first) | Extended by the gateway at each allowed handoff. Never accepted from a request body. |
+
+The gateway hands OPA all three as `input.principal`, `input.agent` and `input.chain`. The role decides which tools are visible and callable; the subject decides tenant isolation and, if you write the rule, record-level access; the chain decides whether this agent should be acting at all.
+
+### Four checkpoints
+
+1. **PEP 1 — the ingress.** The supervisor arrives with a token the IdP issued for this user and this agent (`authn.JWKSVerifier`). In `VALKYRIE_ENV=prod` nothing else is accepted for a supervisor: there is no shared secret anyone could mint with.
+2. **PEP 2 — the handoff (`POST /v1/delegate`).** Before a supervisor delegates, it asks. The gateway evaluates `valkyrie/delegation/decision` with the caller and chain from the verified token and the target, task and budget from the request. On allow it **issues the specialist's token**: the parent's `sub` and `tenant_id`, the target's `agent_id` and `agent_role`, `chain = parent.chain + [parent.agent_id]`, a short TTL, signed with `VALKYRIE_DELEGATION_KEY`. On deny there is no token, so an unapproved handoff has nothing to act with. The verdict is audited as `delegate:<target>` with a decision id.
+3. **PEP 3 — the tool call.** `tool_authz` checks the role's tool binding and tier ceiling, tenant isolation on arguments, and chain integrity (`delegation_loop`: the agent is already in its own chain; `delegation_too_deep`: the chain is at `data.limits.max_delegation_depth`). The lease the gateway then mints for the upstream carries `sub` and `tenant_id`, so the server can authorize and audit at user level without trusting the arguments.
+4. **PEP 4 — the result.** Redaction and row caps by role, as before.
+
+### One request, end to end
+
+```
+Okta/Entra ── OBO token {sub: jane, tenant: acme, agent: concierge-01/concierge} ──► supervisor
+supervisor ── POST /v1/delegate {target: menu-01/menu, task, budget} ──► gateway
+gateway   ── delegation.rego: can_delegate? known role? same tenant? trust? depth? loop? budget? ──► OPA
+gateway   ── allow ⇒ token {sub: jane, tenant: acme, agent: menu-01/menu, chain: [concierge-01]} ──► supervisor ──► specialist
+specialist ── POST /v1/tools/invoke (gateway-issued token) ──► gateway
+gateway   ── tool_authz.rego (role, tier, tenant, chain) ──► OPA ── allow ⇒ lease {scope, sub, tenant_id} ──► MCP server
+```
+
+### Trust domains
+
+Four keys, four audiences, and the verifiers refuse each other's tokens:
+
+| Token | Signed by | Accepted by | Carries |
+|---|---|---|---|
+| On-behalf-of (supervisor) | the IdP (RS256, JWKS) | gateway, prod and dev | user + supervisor identity |
+| Delegated (specialist) | gateway, `VALKYRIE_DELEGATION_KEY`, `iss=valkyrie-gateway` | gateway only | user + specialist identity + attested chain |
+| Lease (per tool call) | gateway, `VALKYRIE_LEASE_KEY` | first-party MCP servers | scope, lease id, user, tenant |
+| Dev HMAC | `VALKYRIE_AUTH_SECRET` | gateway, **dev only** | whatever the caller put in it |
+
+### Policy
+
+- `delegation.rego` (PEP 2) allows a handoff when the caller's role has `can_delegate`, the target role exists, tenants match, `target.trust_level >= task.required_trust`, the chain is below the depth limit, the target is not already in the chain, and the token budget holds. Each failure is a named deny reason.
+- `tool_authz.rego` (PEP 3) adds `delegation_loop` and `delegation_too_deep` to its deny reasons. A chain that was never checked at handoff is still stopped at the tool.
+- The delegation grant is a role attribute in the registry: `valkyriectl role bind concierge --max-tier 1 --can-delegate profile.get_preferences`. It travels in the signed bundle as `data.roles[<role>].can_delegate`, so granting it is a reviewed change like any other binding.
+
+Be honest about what the policy can and cannot know: the caller's role, tenant and chain are attested; `target.trust_level`, `task.required_trust` and the budget are business facts the supervisor supplies. Keep trust levels in registry data if they must be tamper-proof.
+
+### Configuration
+
+| Variable | Default | Production |
+|---|---|---|
+| `VALKYRIE_OIDC_ISSUER` / `_AUDIENCE` / `_JWKS_URL` | unset | required; the gateway refuses to start without the JWKS URL |
+| `VALKYRIE_DELEGATION_KEY` | dev key | 32+ random bytes, required |
+| `VALKYRIE_DELEGATION_TTL_S` | 900 | the longest a specialist identity lives |
+| `VALKYRIE_AUTH_SECRET` | dev secret | ignored in prod: the HMAC verifier is never loaded |
+
+### Where the identity provider fits
+
+Okta, Entra ID and Auth0 all issue the first token: the user signs in, and the agent service exchanges that session for an on-behalf-of token (OAuth 2.0 token exchange, RFC 8693, or Entra's OBO flow) that names the agent as the actor. Map the provider's claims to `sub`, `tenant_id`, `agent_id` and `agent_role` (and `chain`, normally empty at the root). From there the gateway attests every hop itself. If you would rather have the provider issue per-hop tokens too, `authn.Issuer` is a single interface: replace `Issue` with a token-exchange call and keep the verifier chain; the pipeline, the policies and the SDK do not change.
+
+### Using it from an agent
+
+```python
+res = supervisor.delegate({"id": "menu-01", "role": "menu", "tenant_id": "acme", "trust_level": 2},
+                          {"required_trust": 1, "est_tokens": 2000},
+                          budget={"tokens_used": 0, "token_limit": 100_000})
+if not res.allow:
+    ...                                   # a normal result: res.reason says why
+specialist = GatewayClient(GATEWAY, res.token)   # never mint the specialist's token yourself
+```
+
+`agents/pizza/graph.py` does exactly this: the concierge fans out to the menu and ordering agents, and each specialist calls the gateway with the token it was issued. The demo trace shows both handoffs with their decision ids.
+
+## 10. The gateway internals
 
 ### Request lifecycle
 
@@ -419,7 +496,7 @@ Every call emits one audit event (`internal/audit`) with `trace_id`, `decision_i
 
 ---
 
-## 10. Production checklist
+## 11. Production checklist
 
 What the dev stack stubs, and what replaces it.
 
@@ -441,7 +518,7 @@ Language guidance, in one paragraph: the gateway stays Go (goroutine per connect
 
 ---
 
-## 11. Troubleshooting
+## 12. Troubleshooting
 
 | Symptom | Likely cause | Fix |
 | --- | --- | --- |
@@ -462,7 +539,7 @@ Language guidance, in one paragraph: the gateway stays Go (goroutine per connect
 
 ---
 
-## 12. Contributing
+## 13. Contributing
 
 - `make fmt` before committing (gofmt + `opa fmt`).
 - Every policy rule ships with a test for its allow path and its deny reason.

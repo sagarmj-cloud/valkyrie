@@ -63,6 +63,10 @@ Read **[docs/DEVELOPER_GUIDE.md](docs/DEVELOPER_GUIDE.md)** for how to add a too
 4. **Tools are products.** A manifest, an owner, a tier, a schema, tests. Onboarding is a pull request.
 5. **Deny is a normal result.** Agents receive a reason and re-plan.
 
+## Delegated authorization
+
+A tool call is made *by* an agent, *for* a user, *through* a chain of handoffs, and Valkyrie attests all three. The supervisor arrives with an on-behalf-of token from your identity provider (Okta, Entra, Auth0). Before it hands work to a specialist it asks `POST /v1/delegate`; the policy checks the role's delegation grant, the target role, tenant, trust, depth and loops, and on allow the gateway **issues the specialist's identity** with the user and the extended chain inside. Specialists never mint their own tokens, so an unapproved handoff has nothing to act with. Every tool call re-checks the chain, and the per-call lease handed to the server carries the end user for user-level authorization and audit. In production the gateway refuses to start without the IdP's JWKS URL and never accepts a shared-secret token. Details and the full flow: **[docs/DEVELOPER_GUIDE.md § 9](docs/DEVELOPER_GUIDE.md#9-delegated-authorization)**.
+
 ## Language choices
 
 Gateway in Go (goroutine-per-connection, `context` cancellation, one static binary for the one process that holds credentials). Servers in Python by default (thin, I/O-bound adapters owned by the teams closest to the systems), promoted to Go individually when a p99 says so. Rust for sandboxed execution if you have Rust engineers. The gateway's per-server isolation is what makes the server-language choice low-stakes.
