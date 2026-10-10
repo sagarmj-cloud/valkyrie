@@ -1,5 +1,5 @@
 <p align="center">
-  <img alt="Valkyrie — Chooses who passes." src="assets/brand/logo-horizontal-indigo.svg" width="420">
+  <img alt="Valkyrie — policy-enforced tool gateway for AI agents. Every tool call is authorized, leased and audited before it runs." src="assets/brand/hero.png" width="760">
 </p>
 
 # Valkyrie

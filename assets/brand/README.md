@@ -7,7 +7,8 @@
 | `mark*.svg`, `mark-512.png`, `mark-gradient-512.png` | Mark only (indigo, white, gradient). |
 | `app-icon*` | App / PWA icons, 192 to 2048 px, light and dark. |
 | `favicon*` | 16/32/48 px PNG, ICO, SVG. |
+| `hero.png` | 1568×784 hero card (navy, gradient mark, positioning line + tagline). Used as the README header and the GitHub social preview. |
 | `banner.*` | Wide header banner with the long tagline. |
-| `social-preview.png`, `social-preview-indigo.png` | 1280×640 GitHub social preview, dark and indigo variants. Set under **Settings → General → Social preview** (currently the indigo one). |
+| `social-preview.png`, `social-preview-indigo.png` | 1280×640 GitHub social preview, dark and indigo variants. Set under **Settings → General → Social preview** (currently `hero.png`). |
 
 All SVGs are self-contained (text outlined, no external fonts).
