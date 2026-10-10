@@ -70,3 +70,7 @@ Gateway in Go (goroutine-per-connection, `context` cancellation, one static bina
 ## License
 
 Open core. The gateway, SDK, policies, servers, agents, reference and docs are **MIT** (`LICENSE`). The control plane — `controlplane/` (registryd, valkyriectl) — is under the **Valkyrie Enterprise License** (`controlplane/LICENSE`): free to evaluate, develop and test; production use needs a commercial license. Third-party notices are in `NOTICE`; contribution terms in `CONTRIBUTING.md`.
+
+## Enterprise
+
+Planning a production rollout, or need the commercial license for the control plane? Reach out on X at **[@sagarmj](https://x.com/sagarmj)** or **[open an issue](https://github.com/sagarmj-cloud/valkyrie/issues/new)** on this repo.
