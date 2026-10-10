@@ -26,7 +26,7 @@ This guide covers how the pieces fit, how to run them, how to add a tool, a poli
 | Agents | `agents/`, `sdk/python/valkyrie/client.py` | Python, LangGraph | Supervisor + specialists; the gateway client |
 | Deploy | `deploy/` | compose, Kubernetes | Gateway + OPA sidecar pod, per-server Deployments, network policy |
 
-Why the gateway is standard-library Go, the servers Python, and OPA a sidecar is explained in the two accompanying articles; the short version is in §10.
+Why the gateway is standard-library Go, the servers Python, and OPA a sidecar is explained in the two accompanying articles; the short version is in §11.
 
 ---
 
