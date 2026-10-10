@@ -8,15 +8,12 @@
 
 Valkyrie is a homegrown MCP / tool-calling platform for production multi-agent AI systems. Like its namesake, it decides who passes. It is built on one rule: agents *propose* actions, Open Policy Agent *decides* whether each one is allowed, and the Valkyrie gateway *executes* the allowed ones with a short-lived credential. Agents never hold credentials and never reach a system directly.
 
-```
-                     registryd (control plane) ── signed bundle ──► OPA sidecar
-                          │ registry snapshot                          ▲ verdict
-agents · IDE clients ──► Valkyrie gateway (Go) ────────────────────────┘
-                              │
-                              ├──► first-party MCP servers (Python)
-                              ├──► third-party MCP servers (any language, e.g. @modelcontextprotocol/server-everything)
-                              └──► plain REST APIs via HTTP adapters
-```
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/img/architecture-dark.png">
+    <img src="docs/img/architecture.png" alt="Valkyrie architecture: callers invoke the gateway; the gateway asks the OPA sidecar for a verdict, leases a credential and calls first-party MCP servers, third-party MCP servers or REST APIs; registryd publishes the registry snapshot and the signed policy bundle." width="1000">
+  </picture>
+</p>
 
 ## What you get
 
