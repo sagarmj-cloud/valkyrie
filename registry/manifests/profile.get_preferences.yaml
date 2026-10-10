@@ -1,0 +1,20 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 Sagar Jadhav
+name: profile.get_preferences
+owner: team-customer
+server: profile
+version: 1.0.0
+description: Return the customer's dietary profile, allergens, budget and contact details.
+risk_tier: 1                      # 0 read · 1 read-PII · 2 write · 3 destructive / financial
+data_classification: pii
+input_schema:
+  type: object
+  properties:
+    customer_id: { type: string, minLength: 1 }
+  required: [customer_id]
+  additionalProperties: false
+output_schema:
+  type: object
+credentials: { vault_role: profile-reader, scope: "profile:read", ttl_seconds: 300 }
+limits: { timeout_ms: 3000, rate_per_minute: 300, max_result_kb: 64 }
+idempotent: true

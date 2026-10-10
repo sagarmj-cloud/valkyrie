@@ -1,0 +1,7 @@
+{"name": "vegetarian cart within budget is allowed",
+ "rule": "valkyrie/tool_authz/decision",
+ "input": {"agent": {"id": "ordering-01", "role": "ordering"}, "principal": {"sub": "jane", "tenant_id": "acme"},
+           "tool": {"name": "orders.create_cart", "risk_tier": 2, "data_classification": "confidential",
+                    "args": {"customer_id": "c-42", "items": ["Margherita Pizza"]}},
+           "customer": {"id": "c-42", "diet": "vegetarian", "allergens": ["tree_nuts"], "budget_usd": 25}},
+ "expect": {"allow": true}}

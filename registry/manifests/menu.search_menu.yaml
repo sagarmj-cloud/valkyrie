@@ -1,0 +1,21 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 Sagar Jadhav
+name: menu.search_menu
+owner: team-menu
+server: menu
+version: 1.2.0
+description: Search the restaurant menu by free text and dietary filters.
+risk_tier: 0
+data_classification: public
+input_schema:
+  type: object
+  properties:
+    query: { type: string, maxLength: 200 }
+    vegetarian: { type: boolean }
+    max_price_usd: { type: number, minimum: 0 }
+  additionalProperties: false
+output_schema:
+  type: object
+credentials: { vault_role: menu-reader, scope: "menu:read", ttl_seconds: 300 }
+limits: { timeout_ms: 3000, rate_per_minute: 600, max_result_kb: 128 }
+idempotent: true

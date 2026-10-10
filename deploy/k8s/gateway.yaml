@@ -1,0 +1,67 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 Sagar Jadhav
+# Gateway Deployment with the OPA sidecar in the same pod. The policy call
+# never leaves localhost. Scale replicas, not sidecars.
+apiVersion: apps/v1
+kind: Deployment
+metadata: { name: valkyrie-gateway, namespace: valkyrie, labels: { app: valkyrie-gateway } }
+spec:
+  replicas: 3
+  selector: { matchLabels: { app: valkyrie-gateway } }
+  template:
+    metadata: { labels: { app: valkyrie-gateway } }
+    spec:
+      serviceAccountName: valkyrie-gateway
+      securityContext: { runAsNonRoot: true, seccompProfile: { type: RuntimeDefault } }
+      containers:
+        - name: gateway
+          image: ghcr.io/example/valkyrie-gateway:0.1.0
+          ports: [{ containerPort: 8080, name: http }]
+          env:
+            - { name: VALKYRIE_ENV, value: "prod" }
+            - { name: VALKYRIE_OPA_URL, value: "http://127.0.0.1:8181" }
+            - { name: VALKYRIE_REGISTRY, value: "http://valkyrie-registryd:8090/v1/registry" }
+            - { name: VALKYRIE_REGISTRY_TOKEN, valueFrom: { secretKeyRef: { name: valkyrie-registry, key: reader-token } } }
+            - { name: VALKYRIE_OIDC_ISSUER, value: "https://idp.example.com" }
+            - { name: VALKYRIE_OIDC_AUDIENCE, value: "valkyrie" }
+            - { name: VALKYRIE_OIDC_JWKS_URL, value: "https://idp.example.com/.well-known/jwks.json" }
+            - { name: VALKYRIE_LEASE_KEY, valueFrom: { secretKeyRef: { name: valkyrie-keys, key: lease-key } } }
+            - { name: VALKYRIE_VAULT_ADDR, value: "https://vault.internal:8200" }
+            - { name: VALKYRIE_VAULT_TOKEN, valueFrom: { secretKeyRef: { name: valkyrie-vault, key: token } } }
+            - { name: VALKYRIE_REDIS_ADDR, value: "valkyrie-redis:6379" }
+            - { name: VALKYRIE_ADAPTER_ALLOW_HOSTS, value: "weather.internal,*.svc.cluster.local" }
+            - { name: VALKYRIE_MAX_INFLIGHT, value: "64" }
+          readinessProbe: { httpGet: { path: /readyz, port: http }, periodSeconds: 5 }
+          livenessProbe: { httpGet: { path: /healthz, port: http }, periodSeconds: 10 }
+          resources: { requests: { cpu: 200m, memory: 128Mi }, limits: { cpu: "1", memory: 256Mi } }
+          securityContext: { allowPrivilegeEscalation: false, readOnlyRootFilesystem: true, capabilities: { drop: [ALL] } }
+        - name: opa
+          image: openpolicyagent/opa:latest-static
+          args: ["run", "--server", "--addr", "127.0.0.1:8181", "--config-file", "/config/opa-config.yaml"]
+          env:
+            - { name: VALKYRIE_REGISTRYD_URL, value: "http://valkyrie-registryd:8090" }
+            - { name: VALKYRIE_REGISTRY_TOKEN, valueFrom: { secretKeyRef: { name: valkyrie-registry, key: reader-token } } }
+            - { name: VALKYRIE_BUNDLE_KEY, valueFrom: { secretKeyRef: { name: valkyrie-keys, key: bundle-key } } }
+          volumeMounts: [{ name: opa-config, mountPath: /config, readOnly: true }]
+          readinessProbe: { httpGet: { path: /health?bundles, port: 8181 }, periodSeconds: 5 }
+          resources: { requests: { cpu: 100m, memory: 64Mi }, limits: { cpu: 500m, memory: 128Mi } }
+          securityContext: { allowPrivilegeEscalation: false, readOnlyRootFilesystem: true, capabilities: { drop: [ALL] } }
+      volumes:
+        - { name: opa-config, configMap: { name: valkyrie-opa-config } }
+---
+apiVersion: v1
+kind: Service
+metadata: { name: valkyrie-gateway, namespace: valkyrie }
+spec:
+  selector: { app: valkyrie-gateway }
+  ports: [{ port: 80, targetPort: http }]
+---
+# Only the gateway may reach the MCP servers. Servers may reach only their target.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata: { name: servers-only-from-gateway, namespace: valkyrie }
+spec:
+  podSelector: { matchLabels: { tier: mcp-server } }
+  policyTypes: [Ingress]
+  ingress:
+    - from: [{ podSelector: { matchLabels: { app: valkyrie-gateway } } }]

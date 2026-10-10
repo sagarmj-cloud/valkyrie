@@ -1,0 +1,15 @@
+{
+  "name": "weather.forecast",
+  "owner": "team-platform",
+  "server": "weather",
+  "version": "1.0.0",
+  "description": "Forecast for a city from the internal weather REST API (no MCP server; HTTP adapter).",
+  "risk_tier": 0,
+  "data_classification": "internal",
+  "input_schema": {"type": "object", "properties": {"city": {"type": "string", "minLength": 2}, "units": {"type": "string", "enum": ["c", "f"]}},
+                   "required": ["city"], "additionalProperties": false},
+  "credentials": {"type": "static", "secret_ref": "WEATHER_API_KEY", "scope": "weather:read", "header": "X-API-Key", "ttl_seconds": 60},
+  "limits": {"timeout_ms": 3000, "rate_per_minute": 120, "max_result_kb": 16},
+  "idempotent": true,
+  "adapter": {"type": "http", "method": "GET", "url": "http://127.0.0.1:8201/v1/forecast/{city}", "query": ["units"]}
+}

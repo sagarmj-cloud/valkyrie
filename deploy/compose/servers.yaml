@@ -1,0 +1,9 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 Sagar Jadhav
+# Server map for the compose network (copy over registry/servers.yaml before `make registry`).
+servers:
+  profile:  { url: "http://profile:8101/mcp",  runtime: python }
+  menu:     { url: "http://menu:8102/mcp",     runtime: python }
+  orders:   { url: "http://orders:8103/mcp",   runtime: python }
+  payments: { url: "http://payments:8104/mcp", runtime: python }
+  delivery: { url: "http://delivery:8105/mcp", runtime: python }

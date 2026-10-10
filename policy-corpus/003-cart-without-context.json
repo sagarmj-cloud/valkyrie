@@ -1,0 +1,6 @@
+{"name": "cart without customer context fails closed",
+ "rule": "valkyrie/tool_authz/decision",
+ "input": {"agent": {"id": "ordering-01", "role": "ordering"}, "principal": {"sub": "jane", "tenant_id": "acme"},
+           "tool": {"name": "orders.create_cart", "risk_tier": 2, "data_classification": "confidential",
+                    "args": {"customer_id": "c-42", "items": ["Margherita Pizza"]}}},
+ "expect": {"allow": false, "deny_reason_contains": ["missing_customer_context"]}}

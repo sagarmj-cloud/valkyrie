@@ -1,0 +1,23 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 Sagar Jadhav
+name: payments.charge
+owner: team-payments
+server: payments
+version: 3.1.0
+description: Charge a tokenized payment method for an order.
+risk_tier: 3
+data_classification: confidential
+input_schema:
+  type: object
+  properties:
+    order_id: { type: string, minLength: 1 }
+    amount_usd: { type: number, exclusiveMinimum: 0 }
+    payment_token: { type: string, pattern: "^tok_[A-Za-z0-9]+$" }
+  required: [order_id, amount_usd, payment_token]
+  additionalProperties: false
+output_schema:
+  type: object
+credentials: { vault_role: payments-charger, scope: "payments:charge", ttl_seconds: 120 }
+limits: { timeout_ms: 8000, rate_per_minute: 60, max_result_kb: 16 }
+idempotent: true
+approval: { required_above_usd: 50 }

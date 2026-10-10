@@ -1,0 +1,15 @@
+Valkyrie — chooses who passes.
+Copyright (c) 2026 Sagar Jadhav
+
+Licensing
+  - Repository (gateway, SDK, policies, servers, agents, reference, docs): MIT License (LICENSE)
+  - controlplane/ (registryd, valkyriectl): Valkyrie Enterprise License (controlplane/LICENSE)
+
+Third-party software used at runtime (not vendored; obtained separately by the user)
+  - Open Policy Agent (OPA)                    Apache License 2.0        https://github.com/open-policy-agent/opa
+  - MCP Python SDK (`mcp`)                     MIT License               https://github.com/modelcontextprotocol/python-sdk
+  - LangGraph, LangChain Core                  MIT License               https://github.com/langchain-ai/langgraph
+  - httpx, anyio, PyYAML, jsonschema           BSD/MIT licenses          via requirements.txt
+  - @modelcontextprotocol/server-everything    MIT License               used only by `make reference`
+
+The Go modules in gateway/ and controlplane/ depend solely on the Go standard library.

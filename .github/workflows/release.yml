@@ -1,0 +1,65 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 Sagar Jadhav
+#
+# On a tag like v0.2.0: build static binaries for linux/darwin × amd64/arm64,
+# attach them to a GitHub Release, and push container images to GHCR.
+name: release
+on:
+  push:
+    tags: ["v*"]
+permissions:
+  contents: write
+  packages: write
+jobs:
+  binaries:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - { goos: linux,  goarch: amd64 }
+          - { goos: linux,  goarch: arm64 }
+          - { goos: darwin, goarch: amd64 }
+          - { goos: darwin, goarch: arm64 }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with: { go-version: "1.24" }
+      - name: build
+        env: { GOOS: "${{ matrix.goos }}", GOARCH: "${{ matrix.goarch }}", CGO_ENABLED: "0" }
+        run: |
+          mkdir -p dist
+          V=${GITHUB_REF_NAME#v}
+          (cd gateway      && go build -trimpath -ldflags="-s -w -X main.version=$V" -o ../dist/valkyrie     ./cmd/valkyrie)
+          (cd controlplane && go build -trimpath -ldflags="-s -w" -o ../dist/registryd   ./cmd/registryd)
+          (cd controlplane && go build -trimpath -ldflags="-s -w" -o ../dist/valkyriectl ./cmd/valkyriectl)
+          tar -C dist -czf valkyrie_${V}_${GOOS}_${GOARCH}.tar.gz valkyrie registryd valkyriectl
+          sha256sum valkyrie_${V}_${GOOS}_${GOARCH}.tar.gz > valkyrie_${V}_${GOOS}_${GOARCH}.tar.gz.sha256
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            valkyrie_*.tar.gz
+            valkyrie_*.sha256
+          generate_release_notes: true
+  images:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with: { registry: ghcr.io, username: "${{ github.actor }}", password: "${{ secrets.GITHUB_TOKEN }}" }
+      - name: image tags
+        id: meta
+        run: echo "v=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+      - uses: docker/build-push-action@v6
+        with: { context: ., file: gateway/Dockerfile, push: true, platforms: linux/amd64,linux/arm64,
+                tags: "ghcr.io/${{ github.repository_owner }}/valkyrie-gateway:${{ steps.meta.outputs.v }},ghcr.io/${{ github.repository_owner }}/valkyrie-gateway:latest" }
+      - uses: docker/build-push-action@v6
+        with: { context: ., file: controlplane/Dockerfile, push: true, platforms: linux/amd64,linux/arm64,
+                tags: "ghcr.io/${{ github.repository_owner }}/valkyrie-registryd:${{ steps.meta.outputs.v }},ghcr.io/${{ github.repository_owner }}/valkyrie-registryd:latest" }
+      - name: server images
+        run: |
+          for s in profile menu orders payments delivery; do
+            docker buildx build --push --platform linux/amd64,linux/arm64 -f servers/Dockerfile --build-arg SERVER=$s \
+              -t ghcr.io/${{ github.repository_owner }}/valkyrie-server-$s:${{ steps.meta.outputs.v }} \
+              -t ghcr.io/${{ github.repository_owner }}/valkyrie-server-$s:latest .
+          done

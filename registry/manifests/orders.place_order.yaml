@@ -1,0 +1,21 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 Sagar Jadhav
+name: orders.place_order
+owner: team-commerce
+server: orders
+version: 2.0.0
+description: Place an order for an existing cart.
+risk_tier: 2
+data_classification: confidential
+input_schema:
+  type: object
+  properties:
+    cart_id: { type: string, minLength: 1 }
+    deliver_by: { type: string, description: "ISO-8601 time" }
+  required: [cart_id]
+  additionalProperties: false
+output_schema:
+  type: object
+credentials: { vault_role: orders-writer, scope: "orders:write", ttl_seconds: 300 }
+limits: { timeout_ms: 8000, rate_per_minute: 120, max_result_kb: 64 }
+idempotent: true

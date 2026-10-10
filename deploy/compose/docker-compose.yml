@@ -1,0 +1,27 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 Sagar Jadhav
+# docker compose -f deploy/compose/docker-compose.yml up --build
+# Gateway + OPA sidecar + five servers. Servers are reachable only from the
+# gateway network; nothing publishes their ports.
+services:
+  opa:
+    image: openpolicyagent/opa:latest-static
+    command: ["run", "--server", "--addr", "0.0.0.0:8181", "--config-file", "/config/opa-config.yaml", "--ignore=tests", "/policies"]
+    volumes: ["../../policies:/policies:ro", "../opa-config.yaml:/config/opa-config.yaml:ro"]
+    networks: [control]
+  gateway:
+    build: { context: ../.., dockerfile: gateway/Dockerfile }
+    environment:
+      VALKYRIE_OPA_URL: http://opa:8181
+      VALKYRIE_AUTH_SECRET: ${VALKYRIE_AUTH_SECRET:-dev-secret-change-me}
+    ports: ["8080:8080"]
+    depends_on: [opa, profile, menu, orders, payments, delivery]
+    networks: [control, tools]
+  profile:  { build: { context: ../.., dockerfile: servers/Dockerfile, args: { SERVER: profile } },  networks: [tools] }
+  menu:     { build: { context: ../.., dockerfile: servers/Dockerfile, args: { SERVER: menu } },     networks: [tools] }
+  orders:   { build: { context: ../.., dockerfile: servers/Dockerfile, args: { SERVER: orders } },   networks: [tools] }
+  payments: { build: { context: ../.., dockerfile: servers/Dockerfile, args: { SERVER: payments } }, networks: [tools] }
+  delivery: { build: { context: ../.., dockerfile: servers/Dockerfile, args: { SERVER: delivery } }, networks: [tools] }
+networks:
+  control: {}
+  tools: { internal: true }

@@ -1,0 +1,32 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 Sagar Jadhav
+# OPA sidecar configuration.
+#
+# Policies and data arrive as a SIGNED BUNDLE from the control plane
+# (registryd GET /v1/bundle.tar.gz). OPA verifies the bundle's signature with
+# the key below before loading it; a tampered or unsigned bundle is rejected
+# and the last good bundle stays active. Roles and tool tiers inside the
+# bundle come from registryd's store, so a `valkyriectl role bind` reaches
+# every OPA sidecar within max_delay_seconds without a redeploy.
+services:
+  registryd:
+    url: ${VALKYRIE_REGISTRYD_URL}
+    credentials:
+      bearer:
+        token: ${VALKYRIE_REGISTRY_TOKEN}
+bundles:
+  valkyrie:
+    service: registryd
+    resource: /v1/bundle.tar.gz
+    polling:
+      min_delay_seconds: 5
+      max_delay_seconds: 15
+    signing:
+      keyid: valkyrie-ci
+      scope: valkyrie
+keys:
+  valkyrie-ci:
+    algorithm: HS256
+    key: ${VALKYRIE_BUNDLE_KEY}
+decision_logs:
+  console: true

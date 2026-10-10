@@ -1,0 +1,8 @@
+# Owning teams review their own manifests, servers and policy data.
+registry/manifests/profile.*   @team-customer
+registry/manifests/menu.*      @team-menu
+registry/manifests/orders.*    @team-commerce
+registry/manifests/payments.*  @team-payments
+registry/manifests/delivery.*  @team-logistics
+policies/                      @platform-security
+gateway/                       @platform-core

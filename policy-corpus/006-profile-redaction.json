@@ -1,0 +1,6 @@
+{"name": "profile read carries redaction obligations",
+ "rule": "valkyrie/tool_authz/decision",
+ "input": {"agent": {"id": "concierge-01", "role": "concierge"}, "principal": {"sub": "jane", "tenant_id": "acme"},
+           "tool": {"name": "profile.get_preferences", "risk_tier": 1, "data_classification": "pii",
+                    "args": {"customer_id": "c-42"}}},
+ "expect": {"allow": true, "obligations": {"redact_fields": ["phone", "email", "address_line_2"], "max_rows": 100}}}

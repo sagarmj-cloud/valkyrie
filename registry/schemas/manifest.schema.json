@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Valkyrie tool manifest",
+  "type": "object",
+  "required": ["name", "owner", "server", "version", "description", "risk_tier", "data_classification", "input_schema", "credentials", "limits", "idempotent"],
+  "additionalProperties": false,
+  "properties": {
+    "name": { "type": "string", "pattern": "^[a-z][a-z0-9_]*\\.[a-z][a-z0-9_]*$" },
+    "owner": { "type": "string", "minLength": 1 },
+    "server": { "type": "string", "pattern": "^[a-z][a-z0-9-]*$" },
+    "version": { "type": "string", "pattern": "^\\d+\\.\\d+\\.\\d+$" },
+    "description": { "type": "string", "minLength": 10 },
+    "risk_tier": { "type": "integer", "minimum": 0, "maximum": 3 },
+    "data_classification": { "enum": ["public", "internal", "confidential", "pii"] },
+    "input_schema": { "type": "object" },
+    "output_schema": { "type": "object" },
+    "credentials": {
+      "type": "object", "required": ["vault_role", "scope", "ttl_seconds"], "additionalProperties": false,
+      "properties": { "vault_role": { "type": "string" }, "scope": { "type": "string" }, "ttl_seconds": { "type": "integer", "minimum": 30, "maximum": 300 } }
+    },
+    "limits": {
+      "type": "object", "required": ["timeout_ms", "rate_per_minute", "max_result_kb"], "additionalProperties": false,
+      "properties": { "timeout_ms": { "type": "integer", "minimum": 100, "maximum": 60000 }, "rate_per_minute": { "type": "integer", "minimum": 1 }, "max_result_kb": { "type": "integer", "minimum": 1, "maximum": 4096 } }
+    },
+    "idempotent": { "type": "boolean" },
+    "approval": { "type": "object", "properties": { "required_above_usd": { "type": "number" } }, "additionalProperties": false }
+  }
+}

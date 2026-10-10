@@ -1,0 +1,34 @@
+Valkyrie Enterprise License 1.0 (DRAFT — have counsel review before release)
+
+Copyright (c) 2026 Sagar Jadhav. All rights reserved.
+
+This license applies to the software in the `controlplane/` directory of the
+Valkyrie repository (the "Enterprise Software"). It does not apply to the
+rest of the repository, which is licensed under the MIT License.
+
+1. Grant. Subject to this license, you may view, copy, modify and run the
+   Enterprise Software for the purposes of evaluation, development and
+   testing, and for non-production use.
+
+2. Production use. Any use of the Enterprise Software in a production
+   environment, or to provide a service to third parties, requires a
+   commercial license agreement with the copyright holder.
+
+3. Restrictions. You may not redistribute the Enterprise Software or
+   derivative works of it, remove or alter this license or any copyright
+   notice, or use the Enterprise Software to provide a competing product or
+   hosted service.
+
+4. Contributions. Contributions to the Enterprise Software are accepted only
+   under the Contributor License Agreement in CONTRIBUTING.md, which grants
+   the copyright holder the rights needed to license the contribution under
+   this and any other license.
+
+5. Termination. This license terminates automatically if you breach it.
+
+6. No warranty. THE ENTERPRISE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY
+   OF ANY KIND, EXPRESS OR IMPLIED. IN NO EVENT SHALL THE COPYRIGHT HOLDER BE
+   LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY ARISING FROM THE USE OF
+   THE ENTERPRISE SOFTWARE.
+
+For a commercial license, contact sagarmadhukar.jadhav@gmail.com.

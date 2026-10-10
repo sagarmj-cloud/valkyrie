@@ -1,0 +1,47 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 Sagar Jadhav
+# Control plane: one registryd with a persistent volume for its state file.
+# Gateways poll /v1/registry; OPA sidecars poll /v1/bundle.tar.gz.
+apiVersion: apps/v1
+kind: Deployment
+metadata: { name: valkyrie-registryd, namespace: valkyrie, labels: { app: valkyrie-registryd } }
+spec:
+  replicas: 1
+  strategy: { type: Recreate }
+  selector: { matchLabels: { app: valkyrie-registryd } }
+  template:
+    metadata: { labels: { app: valkyrie-registryd } }
+    spec:
+      serviceAccountName: valkyrie-registryd
+      securityContext: { runAsNonRoot: true, seccompProfile: { type: RuntimeDefault } }
+      containers:
+        - name: registryd
+          image: ghcr.io/example/valkyrie-registryd:0.2.0
+          ports: [{ containerPort: 8090, name: http }]
+          env:
+            - { name: REGISTRYD_LISTEN, value: ":8090" }
+            - { name: REGISTRYD_STATE, value: "/var/lib/valkyrie/state.json" }
+            - { name: REGISTRYD_POLICY_DIR, value: "/etc/valkyrie/policies" }
+            - { name: VALKYRIE_REGISTRY_ADMIN_TOKEN, valueFrom: { secretKeyRef: { name: valkyrie-registry, key: admin-token } } }
+            - { name: VALKYRIE_REGISTRY_TOKEN, valueFrom: { secretKeyRef: { name: valkyrie-registry, key: reader-token } } }
+            - { name: VALKYRIE_BUNDLE_KEY, valueFrom: { secretKeyRef: { name: valkyrie-keys, key: bundle-key } } }
+            - { name: VALKYRIE_LEASE_KEY, valueFrom: { secretKeyRef: { name: valkyrie-keys, key: lease-key } } }
+          volumeMounts:
+            - { name: state, mountPath: /var/lib/valkyrie }
+            - { name: policies, mountPath: /etc/valkyrie/policies, readOnly: true }
+          readinessProbe: { httpGet: { path: /readyz, port: http } }
+          resources: { requests: { cpu: 100m, memory: 64Mi }, limits: { cpu: 500m, memory: 128Mi } }
+          securityContext: { allowPrivilegeEscalation: false, readOnlyRootFilesystem: true, capabilities: { drop: [ALL] } }
+      volumes:
+        - { name: state, persistentVolumeClaim: { claimName: valkyrie-registryd } }
+        - { name: policies, configMap: { name: valkyrie-policies } }   # or a git-sync sidecar
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata: { name: valkyrie-registryd, namespace: valkyrie }
+spec: { accessModes: [ReadWriteOnce], resources: { requests: { storage: 1Gi } } }
+---
+apiVersion: v1
+kind: Service
+metadata: { name: valkyrie-registryd, namespace: valkyrie }
+spec: { selector: { app: valkyrie-registryd }, ports: [{ port: 8090, targetPort: http }] }

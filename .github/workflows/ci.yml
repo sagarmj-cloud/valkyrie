@@ -1,0 +1,51 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 Sagar Jadhav
+name: ci
+on: { push: { branches: [main] }, pull_request: {} }
+jobs:
+  registry-and-policy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.13" }
+      - run: pip install pyyaml jsonschema
+      - run: python3 scripts/build_registry.py
+      - uses: open-policy-agent/setup-opa@v2
+        with: { version: latest }
+      - run: opa fmt --fail -l policies
+      - run: opa check --strict --ignore=tests policies
+      - run: make policy-test
+  gateway:
+    runs-on: ubuntu-latest
+    needs: registry-and-policy
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with: { go-version: "1.24" }
+      - run: cd gateway && test -z "$(gofmt -l .)" && go vet ./... && go test -race -count=1 ./...
+      - run: cd controlplane && test -z "$(gofmt -l .)" && go vet ./... && go test -race -count=1 ./...
+      - run: make gateway
+  python:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.13" }
+      - run: pip install -r requirements.txt
+      - run: PYTHONPATH=sdk/python python3 -m pytest -q sdk/python/tests
+  e2e:
+    runs-on: ubuntu-latest
+    needs: [gateway, python]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with: { go-version: "1.24" }
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.13" }
+      - uses: open-policy-agent/setup-opa@v2
+        with: { version: latest }
+      - uses: actions/setup-node@v4
+        with: { node-version: "22" }
+      - run: pip install -r requirements.txt
+      - run: make e2e

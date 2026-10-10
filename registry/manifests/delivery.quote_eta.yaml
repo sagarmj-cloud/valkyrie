@@ -1,0 +1,20 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 Sagar Jadhav
+name: delivery.quote_eta
+owner: team-logistics
+server: delivery
+version: 1.0.0
+description: Quote the estimated delivery time for an order.
+risk_tier: 0
+data_classification: internal
+input_schema:
+  type: object
+  properties:
+    order_id: { type: string, minLength: 1 }
+  required: [order_id]
+  additionalProperties: false
+output_schema:
+  type: object
+credentials: { vault_role: delivery-reader, scope: "delivery:read", ttl_seconds: 300 }
+limits: { timeout_ms: 3000, rate_per_minute: 300, max_result_kb: 16 }
+idempotent: true

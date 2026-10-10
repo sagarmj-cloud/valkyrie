@@ -1,0 +1,15 @@
+[project]
+name = "valkyrie"
+version = "0.2.0"
+description = "Valkyrie SDK: gateway client for agents and MCP server scaffold"
+requires-python = ">=3.10"
+license = "MIT"
+authors = [{ name = "Sagar Jadhav", email = "sagarmadhukar.jadhav@gmail.com" }]
+dependencies = ["mcp>=2.3,<3", "httpx>=0.27", "anyio>=4"]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["valkyrie*"]
