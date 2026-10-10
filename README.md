@@ -1,3 +1,10 @@
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="assets/brand/logo-horizontal-dark.svg">
+    <img alt="Valkyrie — Chooses who passes." src="assets/brand/logo-horizontal.svg" width="420">
+  </picture>
+</p>
+
 # Valkyrie
 
 **Chooses who passes.**
